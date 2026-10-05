@@ -23,9 +23,9 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 ## M1: MVP, owner only
 
 ### Import (§4.1)
-- [~] **FR-1** Import E09 pool JSONL (`importer.py`). Tested on synthetic rows; still needed: the "first 100 real pool rows, 0 rejected" test on `feature/e13-test-fixtures`.
+- [~] **FR-1** Import E09 pool JSONL (`importer.py`). Tested on synthetic rows. The real-sample tests (`tests/test_import_pool.py`, including "first 100 rows, 0 rejected") are written but skip until `docs/e13/fixtures/pool_eval_libre_sample.jsonl` is committed: the upstream commit lost it to the legacy `*.jsonl` ignore rule.
 - [x] **FR-2** One item per (row, qid); `item_id = "<row id>#<qid>"`. Row ids containing `#` are rejected.
-- [~] **FR-3** Render `choice` / `score` / `noul` questions; fall back to the qid when `instructions` is missing; pretty-print JSON values. Done in `label.js`; still needed: render fixtures for each case in a test.
+- [~] **FR-3** Render `choice` / `score` / `noul` questions per `docs/e13/fixtures/README.md`: noul default texts, `_` → space for slug keys, sentence keys selectable, qid fallback, pretty JSON. Done in `label.js`; still needed: an automated render test per case.
 - [x] **FR-4** Detect the state format (`json` when the state is, or parses to, an object or array); `state_format` overrides.
 - [~] **FR-5** Store the state byte-exact, plus `state_sha256`. Still needed: the export → re-import round-trip test (comes with FR-45). A state given as an object is serialised once and that string is stored.
 - [x] **FR-6** Tier resolution: explicit field, then source class; unverified/unknown → restricted; Jev raises.
@@ -131,10 +131,16 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [x] `.gitignore` covers `outputs/` and the DB files. Test fixtures can be committed (the blanket `*.jsonl` ignore is gone) **[eval #10]**.
 - [x] Reproducible environment: `uv.lock` replaces the stale `.uv-freeze.txt` **[eval #7]**.
 
+## Schema drift to watch (from `docs/e13/fixtures/README.md`, "Hedging")
+
+- [ ] The row schema isn't frozen (A2.1 / D8). Relation, reason and evidence fields may move, so re-check §5.4/§5.5 before building the exports.
+- [ ] The canonical JSON form for dict/list criteria isn't settled (FR-3). The UI pretty-prints with 2-space indentation.
+- [ ] The noul default descriptions come from E09 student code, not a contract. They are one constant in `label.js`.
+
 ## Waiting on the owner (requirements §11)
 
 - [ ] Q3: final reason list (`out_of_scope`?). It fixes the key map.
 - [ ] Q7: the reference time for `stale_state`. It decides whether `e13.asof` is shown to labelers.
 - [ ] Q2: the keep rule; Q8: `false_premise` scope; Q9: the boundary order for ambiguous/underspecified/subjective; Q10: overlap of 2 or 3.
-- [ ] Import sample: `feature/e13-test-fixtures`.
+- [~] Import sample: `feature/e13-test-fixtures` is merged (README, SOURCES, builder), but **the JSONL is missing**. Re-add it with `git add -f`, or after merging this branch's `.gitignore`.
 - [ ] Which teachers count as Jev (FR-8)? Currently `jev*` plus `E13_JEV_TEACHERS`. A Jev answer to any question raises **every** item of that row, since the output came from the shared state. Confirm that this conservative reading is wanted.

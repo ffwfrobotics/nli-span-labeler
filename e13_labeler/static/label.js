@@ -7,6 +7,9 @@ const FLAG_KINDS = ['bad_item', 'guideline_unclear', 'other'];
 const CANDIDATE_REASONS = new Set(['stale_state', 'subjective']);
 const REASON_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
 const IDLE_MS = 60000;  // FR-22: active only with an interaction in the last 60 s
+// noul defaults when criteria are absent; wording from the E09 student code
+// (docs/e13/fixtures/README.md, "How each question type maps to options")
+const NOUL_DEFAULT = { true: 'The statement holds.', false: 'The statement does not hold.' };
 
 let L = null;           // the item being labelled, and everything the labeler did to it
 let containers = {};    // container id -> {side, pointer, option, text, bare}
@@ -163,10 +166,11 @@ function buildOptions(q) {
         return crit.map((d, i) => ({ key: String(i), letter: String.fromCharCode(97 + i), name: String(i), desc: d }));
     }
     const descs = crit || {};
-    return [
-        { key: 'true', letter: 't', name: 'true', desc: descs.true ?? null },
-        { key: 'false', letter: 'f', name: 'false', desc: descs.false ?? null },
-    ];
+    return ['true', 'false'].map(k => ({
+        key: k, letter: k[0], name: k,
+        desc: descs[k] ?? NOUL_DEFAULT[k],
+        isDefault: descs[k] == null,  // a default isn't the item's text, so it takes no spans
+    }));
 }
 
 function asJson(value) {
@@ -180,13 +184,20 @@ function renderQuestion(q, qid) {
     document.getElementById('question-text').innerHTML =
         instr == null ? escapeHtml(qid) : (typeof instr === 'string' ? escapeHtml(instr) : asJson(instr));
     document.getElementById('options-view').innerHTML = L.options.map(o => {
-        let desc;
-        if (o.desc == null) desc = '<span class="option-desc">(no description)</span>';
+        const selectable = text => tokenize(text, container({ side: 'option', option: o.key, text }));
+        let name = escapeHtml(q.type === 'choice' ? o.name.replace(/_/g, ' ') : o.name);
+        let desc = '';
+        if (o.desc == null) desc = '';
         else if (typeof o.desc !== 'string') desc = asJson(o.desc);
-        else if (o.desc === o.name) desc = '';
-        else desc = `<span class="option-desc">${tokenize(o.desc, container({ side: 'option', option: o.key, text: o.desc }))}</span>`;
+        else if (o.desc === o.name) {
+            // Key and description are the same text (sentence-like choice keys, e.g. piqa):
+            // show it once, selectable, unless it's a slug that displays with spaces.
+            if (/\s/.test(o.desc) || !o.desc.includes('_')) name = selectable(o.desc);
+        }
+        else if (o.isDefault) desc = `<span class="option-desc"><em>${escapeHtml(o.desc)}</em></span>`;
+        else desc = `<span class="option-desc">${selectable(o.desc)}</span>`;
         return `<div class="option-row"><span class="option-key">${o.letter}</span>` +
-               `<span class="option-name">${escapeHtml(o.name)}</span>${desc}</div>`;
+               `<span class="option-name">${name}${desc ? ':' : ''}</span>${desc}</div>`;
     }).join('');
 }
 

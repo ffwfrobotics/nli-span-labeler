@@ -197,3 +197,39 @@ class TestCli:
         assert main(["import", str(FIXTURE), "--batch", "pilot"]) == 0
         summary = json.loads(capsys.readouterr().out)
         assert summary["n_items"] == 8 and summary["n_rejected"] == 0
+
+
+class TestPoolShapes:
+    """Row shapes described in docs/e13/fixtures/README.md."""
+
+    def test_ids_with_slash_and_colon(self, db, owner_client):
+        """Pool ids contain '/' and ':' (x_snli/snli:246); routes must take them."""
+        from e13_labeler.batches import set_status
+        from e13_labeler.db import get_db
+        from e13_labeler.importer import import_rows
+
+        row = {"id": "x_snli/snli:246", "source": "snli", "split": "eval", "heldout": False,
+               "state": "Two dogs run.", "questions": {"snli_test_8206": {"type": "noul", "instructions": "Animals move."}},
+               "gold": {"snli_test_8206": True}}
+        with get_db() as conn:
+            import_rows(conn, [json.dumps(row)], "x", "x", batch="b")
+            set_status(conn, "b", "open")
+        item_id = owner_client.get("/api/next").json()["item_id"]
+        assert item_id == "x_snli/snli:246#snli_test_8206"
+        assert owner_client.get("/api/lock/status/x_snli/snli:246%23snli_test_8206").json()["locked"]
+
+    def test_gold_absent_or_partial(self):
+        row = dict(by_id("fever/eval/5"))
+        row.pop("gold")
+        assert parse_row(row)[0].gold is None
+        assert parse_row(dict(row, gold={}))[0].gold is None
+
+    def test_sentence_choice_keys_take_option_spans(self):
+        """piqa-style rows use the answer text as key and description."""
+        from e13_labeler.labelling import Span, Submission, validate_submission
+
+        key = "Use a spoon to stir the paint."
+        q = {"type": "choice", "instructions": "Which works?", "criteria": {key: key, "Use a fork.": "Use a fork."}}
+        span = Span(side="option", role="unsupported", text="spoon", option=key, start=6, end=11)
+        validate_submission(Submission(True, [], None, [span], False, None), state="s", state_format="text",
+                            question=q, reason_set=["unrelated"], span_policy={}, require_note=False)
