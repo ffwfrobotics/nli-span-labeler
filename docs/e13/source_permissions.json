@@ -1,0 +1,409 @@
+{
+ "_doc": "E09 source -> permissions class (libre | restricted | unverified) and licence as reviewed in docs/v3/DATASET_INVENTORY.md (2026-10-04). 'unverified' must be traced before release; until then treat as restricted for a permissive model. Updated 2026-10-05 from the licence and QA audit doc (web-verified): piqa/winogrande/openbookqa -> libre; ag_news/race/yelp/qqp -> restricted.",
+ "sources": {
+  "ade": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "ag_news": {
+   "class": "restricted",
+   "licence": "research / non-commercial only (fancyzhx/ag_news card, verified 2026-10-05)"
+  },
+  "agenttraj": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "amazon_stars": {
+   "class": "libre",
+   "licence": "Apache-2.0 (SetFit mirror)"
+  },
+  "arc": {
+   "class": "libre",
+   "licence": "CC-BY-SA-4.0"
+  },
+  "arena_pref": {
+   "class": "libre",
+   "licence": "Apache-2.0"
+  },
+  "banking77": {
+   "class": "libre",
+   "licence": "MIT / CC-BY-4.0"
+  },
+  "bbc_news": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "bias_in_bios": {
+   "class": "libre",
+   "licence": "MIT"
+  },
+  "bitext_support": {
+   "class": "libre",
+   "licence": "CDLA-Sharing-1.0"
+  },
+  "boolq": {
+   "class": "libre",
+   "licence": "CC-BY-SA-3.0"
+  },
+  "cb": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "civil_comments": {
+   "class": "libre",
+   "licence": "CC0-1.0"
+  },
+  "clinc_oos": {
+   "class": "libre",
+   "licence": "CC-BY-3.0"
+  },
+  "cola": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "commonsense_qa": {
+   "class": "libre",
+   "licence": "MIT"
+  },
+  "copa": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "counterfactual": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "cr_reviews": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "dbpedia": {
+   "class": "libre",
+   "licence": "CC-BY-SA-3.0"
+  },
+  "dbpedia_l2": {
+   "class": "libre",
+   "licence": "CC0-1.0"
+  },
+  "dbpedia_l3": {
+   "class": "libre",
+   "licence": "CC0-1.0"
+  },
+  "dolly_category": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "emotion": {
+   "class": "restricted",
+   "licence": "research only (dair-ai/emotion card)"
+  },
+  "enron_spam": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "fever": {
+   "class": "libre",
+   "licence": "CC-BY-SA-3.0"
+  },
+  "fin_phrasebank": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "fin_sentiment": {
+   "class": "libre",
+   "licence": "MIT"
+  },
+  "glaive_tools": {
+   "class": "libre",
+   "licence": "Apache-2.0"
+  },
+  "go_emotions": {
+   "class": "libre",
+   "licence": "Apache-2.0 (Reddit text)"
+  },
+  "hate_offensive": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "hate_speech_scales": {
+   "class": "libre",
+   "licence": "CC-BY-4.0"
+  },
+  "hellaswag": {
+   "class": "libre",
+   "licence": "MIT"
+  },
+  "helpsteer2": {
+   "class": "libre",
+   "licence": "CC-BY-4.0"
+  },
+  "helpsteer3_pref": {
+   "class": "libre",
+   "licence": "CC-BY-4.0"
+  },
+  "hermes_tools": {
+   "class": "libre",
+   "licence": "Apache-2.0"
+  },
+  "hh_rlhf": {
+   "class": "libre",
+   "licence": "MIT"
+  },
+  "hwu64": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "imdb": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "insincere_questions": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "liar2": {
+   "class": "libre",
+   "licence": "Apache-2.0"
+  },
+  "massive_intent": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "massive_scenario": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "medmcqa": {
+   "class": "libre",
+   "licence": "Apache-2.0"
+  },
+  "medqa": {
+   "class": "libre",
+   "licence": "CC-BY-4.0"
+  },
+  "mind2web": {
+   "class": "libre",
+   "licence": "CC-BY-4.0"
+  },
+  "mmlu": {
+   "class": "libre",
+   "licence": "MIT"
+  },
+  "mnli": {
+   "class": "libre",
+   "licence": "mixed per genre (OANC, CC-BY, CC-BY-SA, PD)"
+  },
+  "mrpc": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "msmarco_rel": {
+   "class": "restricted",
+   "licence": "MS MARCO: non-commercial research only"
+  },
+  "multirc": {
+   "class": "restricted",
+   "licence": "research and academic use only (UIUC)"
+  },
+  "newsgroups": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "openbookqa": {
+   "class": "libre",
+   "licence": "Apache-2.0 (allenai/OpenBookQA repo, verified 2026-10-05)"
+  },
+  "paws": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "piqa": {
+   "class": "libre",
+   "licence": "Academic Free License 3.0 (yonatanbisk.com/piqa, verified 2026-10-05)"
+  },
+  "prosocial_safety": {
+   "class": "libre",
+   "licence": "CC-BY-4.0"
+  },
+  "pubmedqa": {
+   "class": "libre",
+   "licence": "MIT"
+  },
+  "qasc": {
+   "class": "libre",
+   "licence": "CC-BY-4.0"
+  },
+  "qnli": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "qqp": {
+   "class": "restricted",
+   "licence": "Quora terms bar redistribution (per PAWS README; verified 2026-10-05)"
+  },
+  "race": {
+   "class": "restricted",
+   "licence": "non-commercial research only, incl. derived data (ehovy/race card, verified 2026-10-05)"
+  },
+  "reward_bench": {
+   "class": "libre",
+   "licence": "ODC-By"
+  },
+  "rte": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "sciq": {
+   "class": "restricted",
+   "licence": "CC-BY-NC-3.0"
+  },
+  "shp": {
+   "class": "restricted",
+   "licence": "Reddit content, no sublicence"
+  },
+  "sms_spam": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "snli": {
+   "class": "libre",
+   "licence": "CC-BY-SA-4.0"
+  },
+  "social_iqa": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "sst2": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "sst5": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "strategyqa": {
+   "class": "libre",
+   "licence": "MIT"
+  },
+  "stsb": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "student_questions": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "subjectivity": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "support_tickets": {
+   "class": "restricted",
+   "licence": "CC-BY-NC-4.0"
+  },
+  "synth": {
+   "class": "libre",
+   "licence": "Apache-2.0 (decider repo)"
+  },
+  "toolace": {
+   "class": "libre",
+   "licence": "Apache-2.0"
+  },
+  "toxic_chat": {
+   "class": "restricted",
+   "licence": "CC-BY-NC-4.0"
+  },
+  "trec": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "truthfulqa": {
+   "class": "libre",
+   "licence": "Apache-2.0"
+  },
+  "tweet_emotion": {
+   "class": "unverified",
+   "licence": "TweetEval: per-task + Twitter terms on tweet text; pointer-only at best (verified 2026-10-05)"
+  },
+  "tweet_hate": {
+   "class": "unverified",
+   "licence": "TweetEval: per-task + Twitter terms on tweet text; pointer-only at best (verified 2026-10-05)"
+  },
+  "tweet_irony": {
+   "class": "unverified",
+   "licence": "TweetEval: per-task + Twitter terms on tweet text; pointer-only at best (verified 2026-10-05)"
+  },
+  "tweet_offensive": {
+   "class": "unverified",
+   "licence": "TweetEval: per-task + Twitter terms on tweet text; pointer-only at best (verified 2026-10-05)"
+  },
+  "tweet_sentiment": {
+   "class": "unverified",
+   "licence": "TweetEval: per-task + Twitter terms on tweet text; pointer-only at best (verified 2026-10-05)"
+  },
+  "typed_decisions": {
+   "class": "libre",
+   "licence": "Apache-2.0"
+  },
+  "ultrafeedback_pref": {
+   "class": "libre",
+   "licence": "MIT"
+  },
+  "wic": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "wiki_qa": {
+   "class": "restricted",
+   "licence": "Microsoft Research Data License"
+  },
+  "winogrande": {
+   "class": "libre",
+   "licence": "CC-BY (allenai/winogrande README, verified 2026-10-05)"
+  },
+  "x_anli_r1": {
+   "class": "restricted",
+   "licence": "CC-BY-NC-4.0"
+  },
+  "x_anli_r2": {
+   "class": "restricted",
+   "licence": "CC-BY-NC-4.0"
+  },
+  "x_anli_r3": {
+   "class": "restricted",
+   "licence": "CC-BY-NC-4.0"
+  },
+  "x_e0_test": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "x_mnli_mm": {
+   "class": "libre",
+   "licence": "mixed per genre"
+  },
+  "x_snli": {
+   "class": "libre",
+   "licence": "CC-BY-SA-4.0"
+  },
+  "x_vitaminc": {
+   "class": "libre",
+   "licence": "CC-BY-SA-3.0"
+  },
+  "x_wanli": {
+   "class": "libre",
+   "licence": "CC-BY-4.0 (card; GPT-3 generations)"
+  },
+  "xstory_cloze": {
+   "class": "libre",
+   "licence": "CC-BY-SA-4.0"
+  },
+  "yahoo_topics": {
+   "class": "unverified",
+   "licence": "mirror states none; upstream licence to trace"
+  },
+  "yelp": {
+   "class": "restricted",
+   "licence": "Yelp dataset agreement: academic/non-commercial, no redistribution (verified 2026-10-05)"
+  }
+ }
+}
