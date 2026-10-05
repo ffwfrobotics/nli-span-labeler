@@ -211,17 +211,18 @@ class TestNextIsBlind:
         only_item(f"{ALERT}#severity")
         payload = owner_client.get("/api/next").json()
         assert set(payload) == {"item_id", "lock_until", "state", "state_format", "question", "reason_set",
-                                "task_type", "span_policy", "require_note", "progress"}
+                                "task_type", "span_policy", "require_note", "asof", "progress"}
         assert set(payload["question"]) <= {"type", "instructions", "criteria"}
+        assert payload["asof"] == "2026-10-05"  # from the row's e13.asof
         text = json.dumps(payload)
         for hidden in ('"gold', '"source', '"e13', '"model_answers', '"is_gold_probe', "candidate_for",
-                       "clefflash", "typed_decisions\"", "abc123", "labels_of_others"):
+                       "clefflash", "typed_decisions\"", "abc123", "labels_of_others", "generator"):
             assert hidden not in text, hidden
         assert payload["progress"]["batch"] == "pilot"
         assert payload["reason_set"] == list(REASONS)
 
     def test_public_never_served_hidden_tiers(self, pilot, public_client: TestClient):
-        """FR-50 / FR-57 for next: a public labeler only ever gets libre items."""
+        """FR-50 / FR-57 for next: a public labeler only gets items whose text is libre."""
         from e13_labeler.db import get_db
 
         seen = set()
@@ -230,10 +231,43 @@ class TestNextIsBlind:
             seen.add(item_id)
             assert submit(public_client, item_id, answerable=True).status_code == 200
         with get_db() as conn:
-            tiers = {row[0] for row in conn.execute(
-                f"SELECT permissions FROM items WHERE item_id IN ({','.join('?' * len(seen))})", tuple(seen))}
-        assert tiers == {"libre"}
-        assert len(seen) == 5  # 4 typed_decisions + 1 snli; fever is jev, bbc and mystery restricted
+            rows = conn.execute(
+                f"SELECT visibility, permissions FROM items WHERE item_id IN ({','.join('?' * len(seen))})",
+                tuple(seen)).fetchall()
+        assert {r[0] for r in rows} == {"libre"}
+        # 4 typed_decisions + 1 snli + fever, whose Jev answer only marks its release tier;
+        # bbc_news (unverified) and mystery_source (unknown) stay internal
+        assert {r[1] for r in rows} == {"libre", "jev"} and len(seen) == 6
+
+    def test_asof_defaults_to_today(self, pilot, owner_client: TestClient):
+        """§11 Q7: items without e13.asof are asked as of today, so generated items don't stand out."""
+        from e13_labeler.auth import utcnow
+
+        only_item(BBC)
+        assert owner_client.get("/api/next").json()["asof"] == utcnow().date().isoformat()
+
+    def test_jev_answer_batch_is_internal_only(self, pilot, fresh_client: TestClient):
+        """A batch that shows Jev's answer makes the items carrying it internal-only."""
+        from e13_labeler.db import get_db
+
+        only_item("fever/eval/5#tall")
+        make_labeler("pub")
+        make_labeler("int", clearance="internal")
+        with get_db() as conn:
+            conn.execute("UPDATE batches SET show_model_answer = 'jev'")
+        login(fresh_client, "pub")
+        assert fresh_client.get("/api/next").status_code == 404
+        assert submit(fresh_client, "fever/eval/5#tall", answerable=True).status_code == 404
+        login(fresh_client, "int")
+        assert fresh_client.get("/api/next").json()["item_id"] == "fever/eval/5#tall"
+
+    def test_non_jev_answer_batch_stays_public(self, pilot, public_client: TestClient):
+        from e13_labeler.db import get_db
+
+        only_item(f"{ALERT}#credential_compromise")  # carries a clefflash answer
+        with get_db() as conn:
+            conn.execute("UPDATE batches SET show_model_answer = 'clefflash'")
+        assert public_client.get("/api/next").status_code == 200
 
     def test_tier_ceiling_narrows(self, pilot, owner_client: TestClient):
         from e13_labeler.db import get_db

@@ -55,8 +55,9 @@ from .labelling import (
     reasons_json,
     validate_submission,
 )
-from .reasons import SKIP_CODES
-from .tiers import tiers_within, visible_tiers
+from .reasons import CANDIDATES, DEFINITIONS, REASONS, SKIP_CODES
+from .importer import is_jev
+from .tiers import tiers_within, visible_to
 
 # Initialize rate limiter with the proxy-aware key function
 limiter = Limiter(
@@ -206,10 +207,10 @@ def fetch_visible_item(conn, item_id: str, labeler: dict):
     The item row if the labeler's clearance allows it, else 404 (FR-50, FR-57).
     A hidden item and a missing one look the same.
     """
-    tiers = visible_tiers(labeler["clearance"])
+    allowed = visible_to(labeler["clearance"])
     row = conn.execute(
-        f"SELECT * FROM items WHERE item_id = ? AND permissions IN ({','.join('?' * len(tiers))})",
-        (item_id, *tiers),
+        f"SELECT * FROM items WHERE item_id = ? AND visibility IN ({','.join('?' * len(allowed))})",
+        (item_id, *allowed),
     ).fetchone()
     if not row:
         raise HTTPException(404, f"Item not found: {item_id}")
@@ -327,6 +328,13 @@ async def get_me(labeler: dict = Depends(get_current_labeler)):
 async def auth_status():
     """Whether the server runs in SINGLE_USER mode. Self-registration is always off (FR-51)."""
     return {"single_user": config.single_user(), "registration_enabled": False, "version": __version__}
+
+
+@app.get("/api/reasons", tags=["Annotation"], summary="Reason definitions")
+async def reason_definitions():
+    """The label set and the short definitions shown to labelers (requirements §1.4)."""
+    return {"reasons": [{"key": r, "definition": DEFINITIONS[r], "candidate": r in CANDIDATES} for r in REASONS],
+            "answerable": "No abstain reason applies: the state settles the question and an option fits."}
 
 
 # ============================================================================
@@ -491,10 +499,33 @@ def _open_batches(conn):
     return conn.execute("SELECT * FROM batches WHERE status = 'open' ORDER BY priority DESC, id").fetchall()
 
 
-def _batch_tiers(batch, labeler: dict) -> tuple:
-    """FR-57: the labeler's clearance, narrowed by the batch's tier ceiling."""
+def _batch_filter(batch, labeler: dict) -> tuple[str, list]:
+    """
+    SQL (over items ``i``) for what this labeler may get from this batch (FR-57):
+    - the item's visibility within the labeler's clearance;
+    - its release tier within the batch's tier_ceiling, which can only narrow;
+    - if the batch shows a Jev teacher's answer (FR-34), items carrying that
+      answer are internal-only (owner decision, 2026-10-05).
+    """
+    allowed = visible_to(labeler["clearance"])
     within = tiers_within(batch["tier_ceiling"])
-    return tuple(t for t in visible_tiers(labeler["clearance"]) if t in within)
+    sql = (f"i.visibility IN ({','.join('?' * len(allowed))}) "
+           f"AND i.permissions IN ({','.join('?' * len(within))})")
+    params = [*allowed, *within]
+    shown = batch["show_model_answer"]
+    if is_jev(shown) and "restricted" not in allowed:
+        sql += """ AND json_extract(i.model_answers_json, '$."' || ? || '"') IS NULL"""
+        params.append(shown)
+    return sql, params
+
+
+def _allowed_in_batch(conn, item_id: str, batch, labeler: dict) -> bool:
+    sql, params = _batch_filter(batch, labeler)
+    return conn.execute(
+        f"""SELECT 1 FROM batch_items bi JOIN items i ON i.item_id = bi.item_id
+            WHERE bi.batch_id = ? AND i.item_id = ? AND {sql}""",
+        (batch["id"], item_id, *params),
+    ).fetchone() is not None
 
 
 def _human_label_count_sql() -> str:
@@ -521,24 +552,24 @@ def pick_next(conn, labeler: dict):
            ORDER BY k.served_at LIMIT 1""",
         (labeler["id"], now, labeler["id"]),
     ).fetchone()
-    if held and held["permissions"] in visible_tiers(labeler["clearance"]):
-        return held, conn.execute("SELECT * FROM batches WHERE id = ?", (held["batch_id"],)).fetchone()
+    if held:
+        batch = conn.execute("SELECT * FROM batches WHERE id = ?", (held["batch_id"],)).fetchone()
+        if _allowed_in_batch(conn, held["item_id"], batch, labeler):
+            return held, batch
 
     best = None
     for batch in _open_batches(conn):
-        allowed = _batch_tiers(batch, labeler)
-        if not allowed:
-            continue
+        allowed_sql, allowed_params = _batch_filter(batch, labeler)
         row = conn.execute(
             f"""SELECT i.*, {_human_label_count_sql()} AS n_labels
                 FROM batch_items bi JOIN batches b ON b.id = bi.batch_id JOIN items i ON i.item_id = bi.item_id
-                WHERE b.id = ? AND i.permissions IN ({','.join('?' * len(allowed))})
+                WHERE b.id = ? AND {allowed_sql}
                   AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.item_id = i.item_id AND a.labeler_id = ?)
                   AND NOT EXISTS (SELECT 1 FROM locks k WHERE k.item_id = i.item_id
                                   AND k.labeler_id != ? AND k.until > ?)
                   AND n_labels < b.overlap_target
                 ORDER BY n_labels > 0 DESC, RANDOM() LIMIT 1""",
-            (batch["id"], *allowed, labeler["id"], labeler["id"], now),
+            (batch["id"], *allowed_params, labeler["id"], labeler["id"], now),
         ).fetchone()
         if row is None:
             continue
@@ -572,9 +603,18 @@ def blind_payload(conn, item, batch, labeler: dict, lock_until: str) -> dict:
         "task_type": batch["task_type"],
         "span_policy": {r: p for r, p in json.loads(batch["span_policy_json"]).items() if r in reason_set},
         "require_note": bool(batch["require_note"]),
+        # The time the question is asked "as of", for stale_state: the generator's
+        # e13.asof when set, otherwise today. Always present, so generated items
+        # don't stand out (owner decision on §11 Q7, 2026-10-05).
+        "asof": item_asof(item),
         "progress": {"batch": batch["name"], "done_by_me": done,
                      "batch_pct": round(complete / total, 4) if total else 0.0},
     }
+
+
+def item_asof(item) -> str:
+    e13 = json.loads(item["e13_json"]) if item["e13_json"] else {}
+    return str(e13.get("asof") or utcnow().date().isoformat())
 
 
 @app.get("/api/next", tags=["Annotation"], summary="Next item to label")
@@ -602,9 +642,7 @@ def _assignment(conn, item_id: str, labeler: dict):
                     (item_id, labeler["id"])).fetchone():
         raise HTTPException(409, "You have already labelled or skipped this item")
     for batch in _open_batches(conn):
-        if item["permissions"] in _batch_tiers(batch, labeler) and conn.execute(
-            "SELECT 1 FROM batch_items WHERE batch_id = ? AND item_id = ?", (batch["id"], item_id)
-        ).fetchone():
+        if _allowed_in_batch(conn, item_id, batch, labeler):
             return item, batch
     raise HTTPException(404, f"Item {item_id} is not in an open batch")
 

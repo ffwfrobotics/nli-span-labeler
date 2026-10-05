@@ -220,7 +220,17 @@ CREATE INDEX idx_annotations_item_labeler ON annotations(item_id, labeler_id);
 CREATE INDEX idx_locks_labeler ON locks(labeler_id);
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3]
+# v4: who may see an item, separate from its release tier (owner decision
+# 2026-10-05): visibility comes from the text's licence only; Jev output only
+# affects the release tier.
+SCHEMA_V4 = """
+ALTER TABLE items ADD COLUMN visibility TEXT NOT NULL DEFAULT 'restricted'
+    CHECK (visibility IN ('libre', 'restricted'));
+UPDATE items SET visibility = CASE WHEN permissions IN ('libre', 'jev') THEN 'libre' ELSE 'restricted' END;
+CREATE INDEX idx_items_visibility ON items(visibility);
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4]
 
 
 def connect() -> sqlite3.Connection:

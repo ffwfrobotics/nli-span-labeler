@@ -125,7 +125,7 @@ def test_labeler_payload_is_blind_for_every_item(imported, owner_client):
     while (r := owner_client.get("/api/next")).status_code == 200:
         payload = r.json()
         assert set(payload) == {"item_id", "lock_until", "state", "state_format", "question", "reason_set",
-                                "task_type", "span_policy", "require_note", "progress"}
+                                "task_type", "span_policy", "require_note", "asof", "progress"}
         assert set(payload["question"]) <= {"type", "instructions", "criteria"}
         owner_client.post("/api/skip", json={"item_id": payload["item_id"], "code": "other"})
         seen += 1

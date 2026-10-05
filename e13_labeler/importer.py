@@ -26,16 +26,18 @@ class RowError(ValueError):
 
 def jev_teachers() -> frozenset:
     """
-    Teachers whose outputs are Jev outputs (FR-8, §8.1). Configure with
-    E13_JEV_TEACHERS=a,b. Any teacher whose name starts with "jev" also counts.
+    Teachers whose outputs are Jev outputs (FR-8, §8.1): an explicit list, matched
+    exactly. Default ``jev`` (the TypeSafe API); set E13_JEV_TEACHERS=a,b to replace
+    it. No prefix or substring matching: ``openjev`` is a local Apache-licensed
+    model, not Jev. The E09 teachers are jev, clef, clefflash, decider, laya,
+    nimble, openjev and semif.
     """
-    extra = os.environ.get("E13_JEV_TEACHERS", "")
-    return frozenset({"jev"} | {t.strip().lower() for t in extra.split(",") if t.strip()})
+    configured = os.environ.get("E13_JEV_TEACHERS", "jev")
+    return frozenset(t.strip() for t in configured.split(",") if t.strip())
 
 
-def is_jev(teacher: str) -> bool:
-    name = teacher.lower()
-    return name in jev_teachers() or name.startswith("jev")
+def is_jev(teacher: Optional[str]) -> bool:
+    return bool(teacher) and teacher in jev_teachers()
 
 
 def eval_only_sources() -> frozenset:
@@ -93,7 +95,8 @@ class ItemRecord:
     state_sha256: str
     question: dict
     gold: object
-    permissions: str
+    permissions: str           # release tier of the row's labels
+    visibility: str            # who may see it: libre | restricted, from the text's licence
     source_license: Optional[str]
     e13: Optional[dict]
     model_answers: Optional[dict]
@@ -140,10 +143,12 @@ def parse_row(row: dict, source_permissions: Optional[dict] = None) -> list[Item
     model_answers = row.get("model_answers") or {}
     if not isinstance(model_answers, dict):
         raise RowError("model_answers must be an object of {teacher: {qid: answer}}")
-    # FR-8/FR-56: any Jev output on the row raises every item of the row. Row-level,
-    # not per question, because the Jev output was produced from the shared state.
+    # FR-8/FR-56: any Jev output on the row marks every item of the row jev, since
+    # the release tier describes the row's labels. Visibility ignores Jev: labelers
+    # never see teacher outputs, so only the text's licence decides who sees it.
     has_jev = any(is_jev(t) for t, answers in model_answers.items() if answers)
     permissions = tiers.max_tier(base_tier, "jev") if has_jev else base_tier
+    visibility = tiers.visibility_of(base_tier)
 
     e13 = row.get("e13") or {}
     if not isinstance(e13, dict):
@@ -177,6 +182,7 @@ def parse_row(row: dict, source_permissions: Optional[dict] = None) -> list[Item
                 question=question,
                 gold=gold.get(qid),
                 permissions=permissions,
+                visibility=visibility,
                 source_license=licence,
                 e13=item_e13 or None,
                 model_answers=answers or None,
@@ -278,14 +284,15 @@ def import_rows(
                               {"from": old["permissions"], "to": item.permissions, "import_run": run_id})
                 conn.execute(
                     """INSERT INTO items (item_id, row_id, qid, source, split, heldout, state, state_format,
-                                          state_sha256, question_json, gold_json, permissions, source_license,
-                                          e13_json, model_answers_json, import_run_id)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                          state_sha256, question_json, gold_json, permissions, visibility,
+                                          source_license, e13_json, model_answers_json, import_run_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                        ON CONFLICT(item_id) DO UPDATE SET
                            source = excluded.source, split = excluded.split, heldout = excluded.heldout,
                            state = excluded.state, state_format = excluded.state_format,
                            state_sha256 = excluded.state_sha256, question_json = excluded.question_json,
                            gold_json = excluded.gold_json, permissions = excluded.permissions,
+                           visibility = excluded.visibility,
                            source_license = excluded.source_license, e13_json = excluded.e13_json,
                            model_answers_json = excluded.model_answers_json,
                            import_run_id = excluded.import_run_id""",
@@ -293,7 +300,7 @@ def import_rows(
                         item.item_id, item.row_id, item.qid, item.source, item.split,
                         None if item.heldout is None else int(bool(item.heldout)),
                         item.state, item.state_format, item.state_sha256, _dumps(item.question),
-                        _dumps(item.gold), item.permissions, item.source_license, _dumps(item.e13),
+                        _dumps(item.gold), item.permissions, item.visibility, item.source_license, _dumps(item.e13),
                         _dumps(item.model_answers), run_id,
                     ),
                 )

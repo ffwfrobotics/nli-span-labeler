@@ -23,6 +23,11 @@ class TestTiers:
         """FR-56: an item's tier is the maximum of its parts."""
         assert tiers.max_tier(*parts) == expected
 
+    @pytest.mark.parametrize("tier, visibility", [("libre", "libre"), ("jev", "libre"),
+                                                  ("restricted", "restricted"), ("jev+restricted", "restricted")])
+    def test_visibility_ignores_jev(self, tier, visibility):
+        assert tiers.visibility_of(tier) == visibility
+
     def test_unknown_source_is_restricted(self):
         """FR-6: unknown sources map to restricted."""
         assert tiers.source_tier("no_such_source_xyz")[0] == "restricted"
@@ -58,7 +63,12 @@ class TestVisibility:
         assert public_client.get("/api/lock/status/src/1#q0").status_code == 404
         assert public_client.get("/api/lock/status/src/2%23q0").status_code == 200
 
-    @pytest.mark.parametrize("tier", ["restricted", "jev", "jev+restricted"])
+    def test_jev_libre_text_is_visible_to_public(self, public_client: TestClient):
+        """Owner decision 2026-10-05: visibility follows the text's licence; Jev only marks the release tier."""
+        insert_item("src/7#q0", "jev")
+        assert public_client.get("/api/lock/status/src/7%23q0").status_code == 200
+
+    @pytest.mark.parametrize("tier", ["restricted", "jev+restricted"])
     def test_public_cannot_touch_hidden_tiers(self, public_client: TestClient, tier):
         insert_item("src/9#q0", tier)
         for method, url in [
@@ -137,3 +147,28 @@ class TestPage:
             body = fresh_client.get(path).text
             assert not re.search(r"""(src|href)\s*=\s*["']?(https?:)?//""", body), path
             assert "@import" not in body and "url(http" not in body, path
+
+
+class TestMigrations:
+    def test_v4_backfills_visibility(self, tmp_path, monkeypatch):
+        """Items imported before v4 get visibility from their tier's restricted flag."""
+        import sqlite3
+
+        from e13_labeler import db
+
+        path = tmp_path / "old.db"
+        monkeypatch.setenv("E13_DB", str(path))
+        conn = sqlite3.connect(path)
+        for number, script in enumerate(db.MIGRATIONS[:3], start=1):
+            conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {number};\nCOMMIT;")
+        for i, tier in enumerate(("libre", "jev", "restricted", "jev+restricted")):
+            conn.execute(
+                """INSERT INTO items (item_id, row_id, qid, source, state, state_format, state_sha256,
+                                      question_json, permissions) VALUES (?, ?, 'q', 's', 'x', 'text', 'h', '{}', ?)""",
+                (f"r{i}#q", f"r{i}", tier))
+        conn.commit()
+        conn.close()
+        assert db.init_db() == len(db.MIGRATIONS)
+        with db.get_db() as c:
+            got = dict(c.execute("SELECT permissions, visibility FROM items").fetchall())
+        assert got == {"libre": "libre", "jev": "libre", "restricted": "restricted", "jev+restricted": "restricted"}

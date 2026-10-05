@@ -12,6 +12,7 @@ const IDLE_MS = 60000;  // FR-22: active only with an interaction in the last 60
 const NOUL_DEFAULT = { true: 'The statement holds.', false: 'The statement does not hold.' };
 
 let L = null;           // the item being labelled, and everything the labeler did to it
+let reasonDefs = {};    // reason -> definition, from /api/reasons (shown as tooltips)
 let containers = {};    // container id -> {side, pointer, option, text, bare}
 
 // ============================================================================
@@ -99,6 +100,7 @@ function renderItem(item) {
     document.getElementById('state-pane').scrollTop = 0;
 
     renderQuestion(item.question, qid);
+    document.getElementById('question-asof').textContent = item.asof ? `as of ${item.asof}` : '';
     renderReasons();
     renderSpans();
     setRegion('state');
@@ -225,6 +227,7 @@ function renderReasons() {
         const tags = '<span class="tags">' + [CANDIDATE_REASONS.has(r) ? '<span class="tag cand">cand</span>' : '',
                       policy === 'required' ? '<span class="tag">*span</span>' : ''].join('') + '</span>';
         return `<li class="reason-row ${checked ? 'checked' : ''} ${L.active === r ? 'active' : ''}"
+                    title="${escapeHtml(reasonDefs[r] || '')}"
                     onclick="labelAction(() => toggleReason('${r}'))">
                     <span class="label-key">${REASON_KEYS[i] || ''}</span>
                     <span>${checked ? '☑' : '☐'} ${escapeHtml(r)}</span>${tags}</li>`;
@@ -688,6 +691,10 @@ document.addEventListener('visibilitychange', () => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
+    fetch('/api/reasons').then(r => r.json()).then(d => {
+        d.reasons.forEach(r => { reasonDefs[r.key] = r.definition; });
+        if (L) renderReasons();
+    }).catch(() => {});
     ['keydown', 'mousedown', 'mousemove', 'wheel', 'input'].forEach(ev =>
         document.addEventListener(ev, noteInteraction, { passive: true }));
     document.getElementById('state-view').addEventListener('mouseup', handleMouseUp);

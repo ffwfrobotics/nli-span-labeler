@@ -17,6 +17,9 @@ FIXTURE = Path(__file__).parent / "fixtures" / "synthetic_pool.jsonl"
 ROWS = [json.loads(line) for line in FIXTURE.read_text().splitlines()]
 
 
+ALERT_ID = "typed_decisions/security_incidents_000085"
+
+
 def by_id(row_id):
     return next(r for r in ROWS if r["id"] == row_id)
 
@@ -73,6 +76,8 @@ class TestImport:
         assert got["bbc_news/eval/73#q0"]["permissions"] == "restricted"  # unverified source
         assert got["mystery_source/eval/1#q"]["permissions"] == "restricted"  # unknown source
         assert got["fever/eval/5#tall"]["permissions"] == "jev"  # libre + Jev answer
+        assert got["fever/eval/5#tall"]["visibility"] == "libre"  # Jev doesn't hide libre text
+        assert got["bbc_news/eval/73#q0"]["visibility"] == "restricted"
         assert got["fever/eval/5#tall"]["source_license"] == "CC-BY-SA-3.0"
 
     def test_hidden_fields_kept_per_item(self, imported):
@@ -182,11 +187,25 @@ class TestRejections:
         assert [lineno for lineno, _ in report.errors] == [6, 7]
 
     def test_jev_teacher_config(self, monkeypatch):
-        """FR-8: teachers configured as Jev raise the tier."""
+        """FR-8: teachers configured as Jev raise the release tier, not the visibility."""
         row = dict(by_id("snli/eval/12"), model_answers={"teacher_x": {"outdoors": {"noul": 0.5}}})
         assert parse_row(row)[0].permissions == "libre"
         monkeypatch.setenv("E13_JEV_TEACHERS", "teacher_x")
-        assert parse_row(row)[0].permissions == "jev"
+        item = parse_row(row)[0]
+        assert item.permissions == "jev" and item.visibility == "libre"
+
+    @pytest.mark.parametrize("teacher", ["openjev", "JEV", "jev2", "clefflash", "decider"])
+    def test_only_exact_jev_counts(self, teacher):
+        """Owner decision 2026-10-05: an explicit list matched exactly; openjev is not Jev."""
+        row = dict(by_id("snli/eval/12"), model_answers={teacher: {"outdoors": {"noul": 0.5}}})
+        assert parse_row(row)[0].permissions == "libre"
+
+    def test_jev_marks_whole_row(self):
+        """Any Jev output on a row marks every item of the row (release tier)."""
+        row = dict(by_id(ALERT_ID), model_answers={"jev": {"severity": {"score": 3}}})
+        items = parse_row(row)
+        assert {i.permissions for i in items} == {"jev"} and len(items) == 4
+        assert {i.visibility for i in items} == {"libre"}
 
 
 class TestCli:

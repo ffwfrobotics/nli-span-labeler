@@ -13,6 +13,25 @@
 > `source_permissions.json` (source → licence tier, web-verified 2026-10-05) is copied beside this file for
 > convenience. Pool rows (`data/v3/e09/pool_eval.jsonl`) are not copied, because some sources are restricted.
 > Ask the owner for an import sample.
+> **Owner decisions (2026-10-05, from the model-dev session).** These override the body text where they differ:
+> 1. **Jev teachers (FR-8):** only `jev` (the TypeSafe API), as an explicit list matched exactly
+>    (`E13_JEV_TEACHERS`, default `jev`). `openjev` is a local Apache-licensed model, not Jev. The E09 teachers are
+>    `jev`, `clef`, `clefflash`, `decider`, `laya`, `nimble`, `openjev` and `semif`.
+> 2. **Release tier vs visibility (§8.1, FR-6, FR-56, FR-57):** `permissions` is the *release* tier of a row's
+>    labels. Any Jev output on a row marks every item of that row `jev` / `jev+restricted`. *Who may see* an item
+>    depends only on the text's licence: `libre` text goes to `public` labelers; `restricted`/`unverified` text is
+>    internal-only. Jev output doesn't hide an item, because labelers never see teacher outputs. Exception: a batch
+>    that shows Jev's answer (`show_model_answer`, FR-34) is internal-only for the items carrying it. Jev outputs are
+>    released with the notice; the tier exists so people can filter them out. This replaces the "who may see it"
+>    column of the §8.1 table for `jev`.
+> 3. **Reason list (§1.4, §11 Q3):** the ten keys of §1.4 are final, in that order. `out_of_scope` is dropped: it
+>    describes the model, and `model_uncertainty` covers it. The renames are confirmed. `conflicting_evidence` is
+>    ticked explicitly and needs ≥1 support and ≥1 refute span. `answerable` stays a separate flag.
+> 4. **`stale_state` (§11 Q7) and `false_premise` (§11 Q8):** `stale_state` is judged against the question's own time
+>    reference: `e13.asof` when set, otherwise today. Labelers ask whether the information *could* have changed,
+>    never whether it did (no world knowledge); the dated or time-sensitive phrase is the required span.
+>    `false_premise` is judged against the state only. The app shows every item's as-of date, so generated items
+>    don't stand out.
 **Experiment:** E13 abstain-reason label quality (`ROADMAP_V3.md` §7).
 **Related:**
 - `ROADMAP_V3.md` §2 (abstention sources) and §7 (the E13 entry);

@@ -73,15 +73,18 @@ def public_client(db, fresh_client) -> TestClient:
     return fresh_client
 
 
-def insert_item(item_id: str, permissions: str = "libre", state: str = "some state") -> None:
+def insert_item(item_id: str, permissions: str = "libre", state: str = "some state",
+                model_answers: dict = None) -> None:
     """Minimal item row for endpoint tests (the importer has its own tests)."""
     from e13_labeler.db import get_db
+    from e13_labeler.tiers import visibility_of
 
     row_id, qid = item_id.split("#")
     with get_db() as conn:
         conn.execute(
             """INSERT INTO items (item_id, row_id, qid, source, state, state_format, state_sha256,
-                                  question_json, permissions)
-               VALUES (?, ?, ?, 'test', ?, 'text', 'sha256:x', ?, ?)""",
-            (item_id, row_id, qid, state, json.dumps({"type": "noul"}), permissions),
+                                  question_json, permissions, visibility, model_answers_json)
+               VALUES (?, ?, ?, 'test', ?, 'text', 'sha256:x', ?, ?, ?, ?)""",
+            (item_id, row_id, qid, state, json.dumps({"type": "noul"}), permissions, visibility_of(permissions),
+             json.dumps(model_answers) if model_answers else None),
         )

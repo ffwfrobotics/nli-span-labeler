@@ -1,8 +1,16 @@
 """
 Data-licence tiers and labeler clearance (requirements §8).
 
-Item tiers, lowest to highest: libre < restricted, jev < jev+restricted.
-``restricted`` and ``jev`` are two independent flags; ``jev+restricted`` has both.
+An item carries two things (owner decision, 2026-10-05):
+
+- ``permissions``, the **release tier** of its row's labels (RELEASE_POLICY.md §2):
+  libre < restricted, jev < jev+restricted. ``restricted`` and ``jev`` are two
+  independent flags; ``jev+restricted`` has both. Any Jev output on a row marks
+  every item of the row ``jev``, so exports can filter Jev out.
+- ``visibility``, who may **see** it: ``libre`` or ``restricted``, from the source
+  text's licence alone. Labelers work blind and never see teacher outputs, so Jev
+  output doesn't change visibility. The exception: a batch that shows a Jev
+  answer (``show_model_answer``, FR-34) is internal-only for the items carrying it.
 """
 
 import json
@@ -14,10 +22,12 @@ from . import config
 
 TIERS = ("libre", "restricted", "jev", "jev+restricted")
 
-# What each clearance may see (§8.1).
-CLEARANCE_TIERS = {
+VISIBILITIES = ("libre", "restricted")
+
+# What each clearance may see, by item visibility.
+CLEARANCE_VISIBILITY = {
     "public": ("libre",),
-    "internal": TIERS,
+    "internal": VISIBILITIES,
 }
 
 # FR-55: sources that are eval-only and bar training; import refuses them.
@@ -27,8 +37,14 @@ EVAL_ONLY_NO_TRAINING = frozenset({"llm_aggrefact", "halubench"})
 SOURCE_PERMISSIONS_PATH = config.REPO_DIR / "docs" / "e13" / "source_permissions.json"
 
 
-def visible_tiers(clearance: str) -> tuple:
-    return CLEARANCE_TIERS.get(clearance, ("libre",))
+def visible_to(clearance: str) -> tuple:
+    """The item visibilities a clearance may see."""
+    return CLEARANCE_VISIBILITY.get(clearance, ("libre",))
+
+
+def visibility_of(tier: str) -> str:
+    """Visibility from the text's licence: a tier's restricted flag; its jev flag doesn't count."""
+    return "restricted" if _flags(tier)[0] else "libre"
 
 
 def _flags(tier: str) -> tuple[bool, bool]:

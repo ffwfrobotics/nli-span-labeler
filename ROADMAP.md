@@ -28,7 +28,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [~] **FR-3** Render `choice` / `score` / `noul` questions per `docs/e13/fixtures/README.md`: noul default texts, `_` → space for slug keys, sentence keys selectable, qid fallback, pretty JSON. Done in `label.js`; still needed: an automated render test per case.
 - [x] **FR-4** Detect the state format (`json` when the state is, or parses to, an object or array); `state_format` overrides.
 - [~] **FR-5** Store the state byte-exact, plus `state_sha256`. Still needed: the export → re-import round-trip test (comes with FR-45). A state given as an object is serialised once and that string is stored.
-- [x] **FR-6** Tier resolution: explicit field, then source class; unverified/unknown → restricted; Jev raises.
+- [x] **FR-6** Tier resolution: explicit field, then source class; unverified/unknown → restricted; Jev raises the release tier only. Visibility (who may see an item) comes from the text's licence.
 - [~] **FR-7** Optional `e13.*` fields, stored per item (`candidate_for` split by qid). Still needed: the "never sent to labelers" test (with FR-12).
 - [x] **FR-8** `model_answers` stored per item, hidden; a Jev teacher raises the tier (showing answers is FR-34).
 - [x] **FR-10** Idempotent import (same hash = no-op, different hash = reject unless `--replace`); `import_runs` and the audit log are written.
@@ -139,8 +139,9 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 
 ## Waiting on the owner (requirements §11)
 
-- [ ] Q3: final reason list (`out_of_scope`?). It fixes the key map.
-- [ ] Q7: the reference time for `stale_state`. It decides whether `e13.asof` is shown to labelers.
-- [ ] Q2: the keep rule; Q8: `false_premise` scope; Q9: the boundary order for ambiguous/underspecified/subjective; Q10: overlap of 2 or 3.
+- [x] Q3: the ten §1.4 keys are final; `out_of_scope` is dropped (2026-10-05).
+- [x] Q7: `stale_state` is judged against `e13.asof`, defaulting to today, with no world knowledge. Every payload carries `asof` and the UI shows it.
+- [x] Q8: `false_premise` is judged against the state only (definition updated; the refuting span stays required).
+- [ ] Q2: the keep rule; Q9: the boundary order for ambiguous/underspecified/subjective; Q10: overlap of 2 or 3.
 - [x] Import sample: `feature/e13-test-fixtures`, merged with its JSONL (sha256 matches the README).
-- [ ] Which teachers count as Jev (FR-8)? Currently `jev*` plus `E13_JEV_TEACHERS`. A Jev answer to any question raises **every** item of that row, since the output came from the shared state. Confirm that this conservative reading is wanted.
+- [x] Jev = an exact list, default `jev` (`openjev` is not Jev). Jev output marks the whole row's **release** tier; **visibility** follows the text's licence only (schema v4 `items.visibility`), except in batches that show Jev's answer.
