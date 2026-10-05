@@ -17,6 +17,7 @@ dependencies = [
 dev = [
     "pytest>=9.1",
     "httpx2>=2.13",       # starlette TestClient transport
+    "jsonschema>=4.23",   # validates exports against the shipped schemas (FR-45)
     "krippendorff>=0.8",   # reference implementation for the alpha tests (FR-40)
 ]
 

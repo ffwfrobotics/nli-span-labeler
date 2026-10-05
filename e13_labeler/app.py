@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -847,3 +847,118 @@ async def set_batch_status(name: str, status: str = Body(..., embed=True), admin
         except ValueError as e:
             raise HTTPException(422, str(e))
     return {"name": name, "status": status, "warnings": warnings}
+
+
+# ============================================================================
+# API Endpoints - Agreement, gold, export (M1)
+# ============================================================================
+
+def _admin_filters(admin: dict, batch: Optional[list] = None, **kwargs):
+    from .records import Filters
+
+    # FR-57: an admin with public clearance sees and exports libre items only
+    return Filters(batches=batch or (), clearance=admin["clearance"], **kwargs)
+
+
+@app.get("/api/admin/agreement", tags=["Admin"], summary="Agreement report")
+async def agreement_report(batch: Optional[list[str]] = Query(None), n_boot: int = Query(1000, ge=0, le=5000),
+                           admin: dict = Depends(require_admin)):
+    """Per-reason α with CI, prevalence and n; candidates vs established; intra-rater; human/model (FR-37/38/41)."""
+    from .analysis import agreement_record, report
+    from .records import load_annotations
+
+    with get_db() as conn:
+        records = [agreement_record(r) for r in load_annotations(conn, _admin_filters(admin, batch))]
+    return report(records, n_boot=n_boot)
+
+
+class GoldIn(BaseModel):
+    answerable: bool = False
+    reasons: list[str] = Field(default_factory=list)
+    spans: list[SpanIn] = Field(default_factory=list)
+    alternatives: dict[str, list[str]] = Field(default_factory=dict,
+                                               description="reason -> acceptable alternative reasons")
+    explanation: Optional[str] = Field(None, max_length=4000)
+
+
+class PromoteIn(BaseModel):
+    labeler: str = Field(..., description="Pseudonym whose latest annotation becomes gold, e.g. L01")
+    explanation: Optional[str] = Field(None, max_length=4000)
+
+
+def _gold_call(fn):
+    try:
+        return fn()
+    except SubmissionError as e:
+        raise HTTPException(422, {"problems": e.problems})
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/api/admin/gold", tags=["Admin"], summary="List gold")
+async def list_gold_items(include_retired: bool = False, admin: dict = Depends(require_admin)):
+    from .gold import list_gold
+
+    with get_db() as conn:
+        items = list_gold(conn, include_retired, visible_to(admin["clearance"]))
+    return {"gold": items, "count": len(items)}
+
+
+@app.put("/api/admin/gold/{item_id:path}", tags=["Admin"], summary="Create or edit gold")
+async def put_gold(item_id: str, body: GoldIn, admin: dict = Depends(require_admin)):
+    """FR-29: gold reasons, spans, acceptable alternatives and an explanation. Spans are validated like labels."""
+    from .gold import save_gold
+
+    with get_db() as conn:
+        fetch_visible_item(conn, item_id, admin)
+        return _gold_call(lambda: save_gold(
+            conn, item_id, answerable=body.answerable, reasons=body.reasons,
+            spans=[s.model_dump() for s in body.spans], alternatives=body.alternatives,
+            explanation=body.explanation, actor_id=admin["id"]))
+
+
+@app.post("/api/admin/gold/{item_id:path}/promote", tags=["Admin"], summary="Promote an annotation to gold")
+async def promote_gold(item_id: str, body: PromoteIn, admin: dict = Depends(require_admin)):
+    from .gold import promote
+
+    with get_db() as conn:
+        fetch_visible_item(conn, item_id, admin)
+        return _gold_call(lambda: promote(conn, item_id, body.labeler, explanation=body.explanation,
+                                          actor_id=admin["id"]))
+
+
+@app.post("/api/admin/gold/{item_id:path}/retire", tags=["Admin"], summary="Retire gold")
+async def retire_gold_item(item_id: str, admin: dict = Depends(require_admin)):
+    """Nothing is hard-deleted (NFR-6); a retired gold item can be saved again."""
+    from .gold import retire_gold
+
+    with get_db() as conn:
+        fetch_visible_item(conn, item_id, admin)
+        return _gold_call(lambda: retire_gold(conn, item_id, admin["id"]))
+
+
+class ExportIn(BaseModel):
+    kinds: list[str] = Field(default_factory=lambda: ["annotations", "training", "agreement", "items"])
+    batches: list[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
+    since: Optional[str] = None
+    until: Optional[str] = None
+    include_models: bool = True
+    include_gold: bool = False
+    text_included: bool = True
+
+
+@app.post("/api/admin/export", tags=["Admin"], summary="Write an export run")
+async def run_export(body: ExportIn, admin: dict = Depends(require_admin)):
+    """FR-45..49: writes outputs/e13_labeler/exports/<timestamp>/ on the server and returns its manifest."""
+    from .exports import write_export
+
+    with get_db() as conn:
+        try:
+            return write_export(conn, kinds=body.kinds, text_included=body.text_included, actor_id=admin["id"],
+                                filters=_admin_filters(admin, body.batches, permissions=body.permissions,
+                                                       since=body.since, until=body.until,
+                                                       include_models=body.include_models,
+                                                       include_gold=body.include_gold))
+        except ValueError as e:
+            raise HTTPException(422, str(e))

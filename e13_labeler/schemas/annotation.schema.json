@@ -1,0 +1,317 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "e13.annotation/1",
+ "title": "E13 annotation export row (requirements \u00a75.4)",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "schema",
+  "item_id",
+  "row_id",
+  "qid",
+  "batch",
+  "labeler",
+  "labeler_kind",
+  "version",
+  "guideline_version",
+  "permissions",
+  "state_sha256",
+  "answerable",
+  "reasons",
+  "spans",
+  "relation",
+  "note",
+  "skipped",
+  "policy_override",
+  "asof",
+  "timing",
+  "app_version",
+  "created_at"
+ ],
+ "properties": {
+  "schema": {
+   "const": "e13.annotation/1"
+  },
+  "item_id": {
+   "type": "string"
+  },
+  "row_id": {
+   "type": "string"
+  },
+  "qid": {
+   "type": "string"
+  },
+  "batch": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "labeler": {
+   "type": "string",
+   "description": "Pseudonym (L03) or model name; never a real identity"
+  },
+  "labeler_kind": {
+   "enum": [
+    "human",
+    "model"
+   ]
+  },
+  "version": {
+   "type": "integer",
+   "minimum": 1
+  },
+  "guideline_version": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "permissions": {
+   "enum": [
+    "libre",
+    "restricted",
+    "jev",
+    "jev+restricted"
+   ]
+  },
+  "state_sha256": {
+   "type": "string",
+   "pattern": "^sha256:[0-9a-f]{64}$"
+  },
+  "answerable": {
+   "type": [
+    "boolean",
+    "null"
+   ]
+  },
+  "reasons": {
+   "type": [
+    "object",
+    "null"
+   ],
+   "additionalProperties": false,
+   "required": [
+    "unrelated",
+    "not_enough_info",
+    "conflicting_evidence",
+    "non_factual_support",
+    "stale_state",
+    "ambiguous",
+    "underspecified",
+    "false_premise",
+    "no_option_fits",
+    "subjective"
+   ],
+   "properties": {
+    "unrelated": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    },
+    "not_enough_info": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    },
+    "conflicting_evidence": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    },
+    "non_factual_support": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    },
+    "stale_state": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    },
+    "ambiguous": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    },
+    "underspecified": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    },
+    "false_premise": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    },
+    "no_option_fits": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    },
+    "subjective": {
+     "type": [
+      "boolean",
+      "null"
+     ]
+    }
+   }
+  },
+  "spans": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "side",
+     "pointer",
+     "start",
+     "end",
+     "text",
+     "role",
+     "option",
+     "reasons"
+    ],
+    "properties": {
+     "side": {
+      "enum": [
+       "state",
+       "option"
+      ]
+     },
+     "pointer": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "start": {
+      "type": [
+       "integer",
+       "null"
+      ],
+      "minimum": 0
+     },
+     "end": {
+      "type": [
+       "integer",
+       "null"
+      ],
+      "minimum": 1
+     },
+     "text": {
+      "type": "string",
+      "minLength": 1
+     },
+     "role": {
+      "enum": [
+       "support",
+       "refute",
+       "unsupported",
+       "framing"
+      ]
+     },
+     "option": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "reasons": {
+      "type": "array",
+      "items": {
+       "enum": [
+        "unrelated",
+        "not_enough_info",
+        "conflicting_evidence",
+        "non_factual_support",
+        "stale_state",
+        "ambiguous",
+        "underspecified",
+        "false_premise",
+        "no_option_fits",
+        "subjective"
+       ]
+      },
+      "uniqueItems": true
+     }
+    }
+   }
+  },
+  "relation": {
+   "type": [
+    "object",
+    "null"
+   ]
+  },
+  "note": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "skipped": {
+   "enum": [
+    null,
+    "cannot_judge",
+    "broken_item",
+    "offensive",
+    "too_long",
+    "other"
+   ]
+  },
+  "policy_override": {
+   "type": "boolean"
+  },
+  "asof": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "pattern": "^\\d{4}-\\d{2}-\\d{2}"
+  },
+  "timing": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "active_ms",
+    "wall_ms"
+   ],
+   "properties": {
+    "active_ms": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0
+    },
+    "wall_ms": {
+     "type": [
+      "integer",
+      "null"
+     ],
+     "minimum": 0
+    }
+   }
+  },
+  "app_version": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "created_at": {
+   "type": "string",
+   "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+  }
+ }
+}

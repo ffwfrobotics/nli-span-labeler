@@ -215,5 +215,7 @@ class TestTierFuzz:
                 assert "TOP-SECRET-TEXT" not in response.text, (method, path)
                 assert "src/secret" not in response.text or response.status_code in (403, 404), (method, path)
                 if "{item_id" in path or path in ("/api/annotations", "/api/skip", "/api/flag"):
-                    assert response.status_code == 404, (method, path, response.status_code)
+                    # 404 for item routes; 403 for admin-only ones. Either way nothing leaks.
+                    expected = 403 if path.startswith("/api/admin/") else 404
+                    assert response.status_code == expected, (method, path, response.status_code)
         assert checked >= 10  # every /api route except auth; 13 today

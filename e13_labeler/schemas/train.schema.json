@@ -1,0 +1,470 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "e13.train/1",
+ "title": "E13 training export row (requirements \u00a75.5)",
+ "type": "object",
+ "required": [
+  "schema",
+  "id",
+  "qid",
+  "source",
+  "permissions",
+  "text_included",
+  "state_sha256",
+  "targets",
+  "human"
+ ],
+ "properties": {
+  "schema": {
+   "const": "e13.train/1"
+  },
+  "id": {
+   "type": "string"
+  },
+  "qid": {
+   "type": "string"
+  },
+  "source": {
+   "type": "string"
+  },
+  "split": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "heldout": {
+   "type": [
+    "boolean",
+    "null"
+   ]
+  },
+  "permissions": {
+   "enum": [
+    "libre",
+    "restricted",
+    "jev",
+    "jev+restricted"
+   ]
+  },
+  "source_license": {
+   "type": [
+    "string",
+    "null"
+   ]
+  },
+  "label_provenance": {
+   "const": "human"
+  },
+  "text_included": {
+   "type": "boolean"
+  },
+  "state_sha256": {
+   "type": "string",
+   "pattern": "^sha256:[0-9a-f]{64}$"
+  },
+  "state": {
+   "type": "string"
+  },
+  "question": {
+   "type": "object",
+   "required": [
+    "type"
+   ]
+  },
+  "targets": {
+   "type": "object",
+   "required": [
+    "mbnli"
+   ],
+   "properties": {
+    "mbnli": {
+     "type": "object",
+     "required": [
+      "abstain",
+      "evidence"
+     ],
+     "properties": {
+      "abstain": {
+       "type": "object",
+       "required": [
+        "p",
+        "reasons",
+        "evidence"
+       ],
+       "properties": {
+        "p": {
+         "type": "number",
+         "minimum": 0,
+         "maximum": 1
+        },
+        "reasons": {
+         "type": "object",
+         "additionalProperties": false,
+         "required": [
+          "unrelated",
+          "not_enough_info",
+          "conflicting_evidence",
+          "non_factual_support",
+          "stale_state",
+          "ambiguous",
+          "underspecified",
+          "false_premise",
+          "no_option_fits",
+          "subjective"
+         ],
+         "properties": {
+          "unrelated": {
+           "type": [
+            "number",
+            "null"
+           ],
+           "minimum": 0,
+           "maximum": 1
+          },
+          "not_enough_info": {
+           "type": [
+            "number",
+            "null"
+           ],
+           "minimum": 0,
+           "maximum": 1
+          },
+          "conflicting_evidence": {
+           "type": [
+            "number",
+            "null"
+           ],
+           "minimum": 0,
+           "maximum": 1
+          },
+          "non_factual_support": {
+           "type": [
+            "number",
+            "null"
+           ],
+           "minimum": 0,
+           "maximum": 1
+          },
+          "stale_state": {
+           "type": [
+            "number",
+            "null"
+           ],
+           "minimum": 0,
+           "maximum": 1
+          },
+          "ambiguous": {
+           "type": [
+            "number",
+            "null"
+           ],
+           "minimum": 0,
+           "maximum": 1
+          },
+          "underspecified": {
+           "type": [
+            "number",
+            "null"
+           ],
+           "minimum": 0,
+           "maximum": 1
+          },
+          "false_premise": {
+           "type": [
+            "number",
+            "null"
+           ],
+           "minimum": 0,
+           "maximum": 1
+          },
+          "no_option_fits": {
+           "type": [
+            "number",
+            "null"
+           ],
+           "minimum": 0,
+           "maximum": 1
+          },
+          "subjective": {
+           "type": [
+            "number",
+            "null"
+           ],
+           "minimum": 0,
+           "maximum": 1
+          }
+         }
+        },
+        "evidence": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+           "side",
+           "pointer",
+           "start",
+           "end",
+           "text",
+           "role",
+           "option",
+           "votes",
+           "reasons"
+          ],
+          "properties": {
+           "side": {
+            "enum": [
+             "state",
+             "option"
+            ]
+           },
+           "pointer": {
+            "type": [
+             "string",
+             "null"
+            ]
+           },
+           "start": {
+            "type": [
+             "integer",
+             "null"
+            ]
+           },
+           "end": {
+            "type": [
+             "integer",
+             "null"
+            ]
+           },
+           "text": {
+            "type": "string"
+           },
+           "role": {
+            "enum": [
+             "support",
+             "refute",
+             "unsupported",
+             "framing"
+            ]
+           },
+           "option": {
+            "type": [
+             "string",
+             "null"
+            ]
+           },
+           "votes": {
+            "type": "integer",
+            "minimum": 1
+           },
+           "reasons": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+             "enum": [
+              "unrelated",
+              "not_enough_info",
+              "conflicting_evidence",
+              "non_factual_support",
+              "stale_state",
+              "ambiguous",
+              "underspecified",
+              "false_premise",
+              "no_option_fits",
+              "subjective"
+             ]
+            }
+           }
+          }
+         }
+        }
+       }
+      },
+      "evidence": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "side",
+         "pointer",
+         "start",
+         "end",
+         "text",
+         "role",
+         "option",
+         "votes"
+        ],
+        "properties": {
+         "side": {
+          "enum": [
+           "state",
+           "option"
+          ]
+         },
+         "pointer": {
+          "type": [
+           "string",
+           "null"
+          ]
+         },
+         "start": {
+          "type": [
+           "integer",
+           "null"
+          ]
+         },
+         "end": {
+          "type": [
+           "integer",
+           "null"
+          ]
+         },
+         "text": {
+          "type": "string"
+         },
+         "role": {
+          "enum": [
+           "support",
+           "refute",
+           "unsupported",
+           "framing"
+          ]
+         },
+         "option": {
+          "type": [
+           "string",
+           "null"
+          ]
+         },
+         "votes": {
+          "type": "integer",
+          "minimum": 1
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "human": {
+   "type": "object",
+   "required": [
+    "n_labelers",
+    "labelers",
+    "answerable_votes",
+    "majority",
+    "adjudicated",
+    "batch",
+    "guideline_version",
+    "reason_set"
+   ],
+   "properties": {
+    "n_labelers": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "labelers": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "answerable_votes": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "majority": {
+     "type": "object",
+     "required": [
+      "answerable",
+      "reasons"
+     ],
+     "properties": {
+      "answerable": {
+       "type": [
+        "boolean",
+        "null"
+       ]
+      },
+      "reasons": {
+       "type": "array",
+       "items": {
+        "enum": [
+         "unrelated",
+         "not_enough_info",
+         "conflicting_evidence",
+         "non_factual_support",
+         "stale_state",
+         "ambiguous",
+         "underspecified",
+         "false_premise",
+         "no_option_fits",
+         "subjective"
+        ]
+       }
+      },
+      "tied_reasons": {
+       "type": "array",
+       "items": {
+        "enum": [
+         "unrelated",
+         "not_enough_info",
+         "conflicting_evidence",
+         "non_factual_support",
+         "stale_state",
+         "ambiguous",
+         "underspecified",
+         "false_premise",
+         "no_option_fits",
+         "subjective"
+        ]
+       }
+      }
+     }
+    },
+    "adjudicated": {
+     "type": [
+      "object",
+      "null"
+     ]
+    }
+   }
+  }
+ },
+ "allOf": [
+  {
+   "if": {
+    "properties": {
+     "text_included": {
+      "const": true
+     }
+    }
+   },
+   "then": {
+    "required": [
+     "state",
+     "question"
+    ]
+   },
+   "else": {
+    "not": {
+     "anyOf": [
+      {
+       "required": [
+        "state"
+       ]
+      },
+      {
+       "required": [
+        "question"
+       ]
+      }
+     ]
+    }
+   }
+  }
+ ]
+}
