@@ -1,0 +1,50 @@
+# The labeler behind Caddy (automatic HTTPS). From the repository root:
+#   E13_DOMAIN=labels.example.org podman compose -f deploy/compose.yaml up -d --build
+#   podman compose -f deploy/compose.yaml exec app python -m e13_labeler create-owner
+# Then the owner logs in at https://$E13_DOMAIN and sends invite links (FR-51).
+# Data, exports and backups live in the e13-data volume; back it up off the host too.
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Containerfile
+      args:
+        E13_APP_COMMIT: ${E13_APP_COMMIT:-}
+    environment:
+      ALLOWED_HOSTS: ${E13_DOMAIN:?set E13_DOMAIN}
+      TRUSTED_PROXIES: 172.30.13.2       # Caddy's fixed address below
+      COOKIE_SECURE: "1"
+    volumes:
+      - e13-data:/data
+    networks:
+      e13:
+        ipv4_address: 172.30.13.3
+    restart: unless-stopped
+    # No published port: only Caddy reaches the app
+
+  caddy:
+    image: docker.io/library/caddy:2
+    environment:
+      E13_DOMAIN: ${E13_DOMAIN:?set E13_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks:
+      e13:
+        ipv4_address: 172.30.13.2
+    depends_on:
+      - app
+    restart: unless-stopped
+
+networks:
+  e13:
+    ipam:
+      config:
+        - subnet: 172.30.13.0/24
+
+volumes:
+  e13-data:
+  caddy-data:

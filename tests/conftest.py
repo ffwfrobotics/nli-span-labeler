@@ -17,6 +17,7 @@ os.environ.pop("SINGLE_USER", None)
 # No hidden gold unless a test asks for it (FR-28 is random by design)
 os.environ["E13_GOLD_RATE_NEW"] = "0"
 os.environ["E13_GOLD_RATE"] = "0"
+os.environ["BACKUP_INTERVAL_HOURS"] = "0"  # tests that back up do it explicitly
 
 OWNER_PASSWORD = "owner-pass-123"
 LABELER_PASSWORD = "labeler-pass-123"

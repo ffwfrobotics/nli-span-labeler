@@ -9,6 +9,7 @@ Command-line entry point.
     python -m e13_labeler export [--kind ...] [--batch ...] [--permissions ...] [--no-text] ...
     python -m e13_labeler agreement [--batch ...]
     python -m e13_labeler gold {list | import FILE | promote ITEM --from L01 | retire ITEM}
+    python -m e13_labeler backup [--dir DIR]                       # NFR-6; the server also backs up nightly
     python -m e13_labeler serve [--host 127.0.0.1] [--port 8000] [--reload]
 """
 
@@ -247,6 +248,18 @@ def cmd_gold(args) -> int:
     return 0
 
 
+def cmd_backup(args) -> int:
+    """NFR-6: an online backup now."""
+    from .backup import backup
+
+    init_db()
+    result = backup(args.dir)
+    with get_db() as conn:
+        audit(conn, None, "backup", result["path"], {"sha256": result["sha256"]})
+    print(json.dumps(result))
+    return 0
+
+
 def cmd_serve(args) -> int:
     import uvicorn
 
@@ -345,6 +358,10 @@ def main(argv=None) -> int:
     g = gsub.add_parser("retire")
     g.add_argument("item")
     p.set_defaults(func=cmd_gold)
+
+    p = sub.add_parser("backup", help="online backup of the database (NFR-6)")
+    p.add_argument("--dir", help="destination (default outputs/e13_labeler/backups)")
+    p.set_defaults(func=cmd_backup)
 
     p = sub.add_parser("serve", help="run the web app")
     p.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))

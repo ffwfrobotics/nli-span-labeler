@@ -1,0 +1,10 @@
+# Keep the build context small and free of data (NFR-4: no labels or identities in images)
+.git
+.venv
+outputs
+data
+*.db
+*.db-*
+__pycache__
+tests
+docs

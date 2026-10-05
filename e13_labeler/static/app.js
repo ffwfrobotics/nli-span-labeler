@@ -536,6 +536,25 @@ async function labelerAction(pseudonym, action, clearance) {
     loadAdmin();
 }
 
+// FR-11: the CLI importer, from the browser
+async function runImport() {
+    const file = document.getElementById('import-file').files[0];
+    const el = document.getElementById('import-result');
+    if (!file) return (el.textContent = 'Choose a file first');
+    el.textContent = `Importing ${file.name}…`;
+    const resp = await authenticatedFetch('/api/admin/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, content: await file.text(),
+                               batch: document.getElementById('import-batch').value.trim() || null,
+                               replace: document.getElementById('import-replace').checked }),
+    });
+    const r = await resp.json();
+    if (!resp.ok) return (el.textContent = `Import failed: ${typeof r.detail === 'string' ? r.detail : JSON.stringify(r.detail)}`);
+    el.textContent = `${r.n_rows} rows: ${r.n_items} new or replaced items, ${r.n_unchanged} unchanged, ${r.n_rejected} rejected` +
+        (r.errors.length ? ` (first: line ${r.errors[0].line}: ${r.errors[0].error})` : '');
+    loadAdmin();
+}
+
 async function resolveFlag(id, status) {
     const resolution = prompt(`${status === 'resolved' ? 'What was done' : 'Why dismiss it'}? (optional)`);
     if (resolution === null) return;

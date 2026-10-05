@@ -205,6 +205,14 @@
                     <tbody></tbody>
                 </table>
                 <div id="export-result" class="question-type" style="margin-top: 8px;"></div>
+                <div class="import-row">
+                    <label for="import-file">Import pool JSONL</label>
+                    <input type="file" id="import-file" accept=".jsonl,.json,application/jsonl,text/plain">
+                    <input type="text" id="import-batch" placeholder="batch (optional)" aria-label="Batch name">
+                    <label><input type="checkbox" id="import-replace"> replace changed states</label>
+                    <button class="btn btn-small" onclick="runImport()">Import</button>
+                </div>
+                <div id="import-result" class="question-type"></div>
             </div>
             <div class="card">
                 <div class="labels-header">

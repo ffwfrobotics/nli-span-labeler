@@ -6,13 +6,24 @@ settings for features that no longer exist (tokenizer, consensus pools,
 calibration routing, training mode) are gone.
 
 Environment variables:
-    E13_DB=path                  SQLite database (default: outputs/e13_labeler/e13.db)
+    E13_OUTPUTS=dir              Database, exports and backups (default: outputs/e13_labeler)
+    E13_DB=path                  SQLite database (default: $E13_OUTPUTS/e13.db)
     SINGLE_USER=1                One owner account, auto-login, loopback only (FR-54)
     LOCK_TIMEOUT_MINUTES=20      How long an item lock lasts (FR-32)
     SESSION_EXPIRY_DAYS=30       Session lifetime
     COOKIE_SECURE=1|0            Session cookie Secure flag (default: on, except in SINGLE_USER mode)
     ALLOWED_HOSTS=a,b            Accepted Host headers (default: loopback names in SINGLE_USER, else any)
     TRUSTED_PROXIES=ip,ip        Proxies whose X-Forwarded-For / X-Real-IP are believed
+    BACKUP_INTERVAL_HOURS=24     Online backup when the newest is older than this (0: off; NFR-6)
+    E13_BACKUP_DIR=path          Backup directory (default: outputs/e13_labeler/backups)
+
+Onboarding and gold:
+    E13_GUIDELINE=path           Guideline JSON (default: e13_labeler/guideline.json)
+    E13_QUIZ_SIZE=12             Quiz items (at least 12: every reason plus two answerable)
+    E13_GOLD_RATE_NEW=0.20       Hidden gold share for a labeler's first E13_GOLD_WARMUP=50 items
+    E13_GOLD_RATE=0.05           ... and after that
+    E13_GOLD_THRESHOLD=0.6       Rolling gold accuracy below this pauses a labeler
+    E13_GOLD_MIN_PROBES=10       ... once they have answered this many probes
 
 Rate limiting:
     RATE_LIMIT_ENABLED=1         Enable/disable rate limiting (default: enabled)
@@ -33,7 +44,8 @@ from pathlib import Path
 PACKAGE_DIR = Path(__file__).parent.resolve()
 REPO_DIR = PACKAGE_DIR.parent
 STATIC_DIR = PACKAGE_DIR / "static"
-OUTPUTS_DIR = REPO_DIR / "outputs" / "e13_labeler"
+# Database, exports and backups live here unless E13_DB / E13_BACKUP_DIR say otherwise
+OUTPUTS_DIR = Path(os.environ.get("E13_OUTPUTS", REPO_DIR / "outputs" / "e13_labeler"))
 
 
 def _flag(name: str, default: str = "0") -> bool:

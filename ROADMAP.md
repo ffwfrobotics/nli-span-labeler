@@ -32,7 +32,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [x] **FR-7** Optional `e13.*` fields, stored per item (`candidate_for` split by qid), never sent to labelers (`test_payload_shape`; `asof` is the one exception, shown for every item).
 - [x] **FR-8** `model_answers` stored per item, hidden; a Jev teacher raises the tier (showing answers is FR-34).
 - [x] **FR-10** Idempotent import (same hash = no-op, different hash = reject unless `--replace`); `import_runs` and the audit log are written.
-- [~] **FR-11** `python -m e13_labeler import FILE --batch NAME` is done. Still needed: the admin upload page (M2).
+- [x] **FR-11** `python -m e13_labeler import FILE --batch NAME`, and Admin → Batches → Import (`POST /api/admin/import`, same importer; lowering a tier stays CLI-only).
 - [x] **FR-55** Refuse eval-only sources: the seed list plus `E13_EVAL_ONLY_SOURCES`. Neither seed source is in `source_permissions.json` **[eval #8]**. The source keys must be checked against the real pool data.
 - [x] **FR-56** Max-tier rule. A replacement that lowers a tier needs `--allow-lower-tier`, which is audit-logged.
 
@@ -61,7 +61,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [x] **FR-47** Export filters: batch, exact `permissions`, date range, models in or out, gold in or out, and the exporter's clearance (CLI flags and the API body).
 - [x] **FR-48** Agreement export: every number plus the exact records, so `analysis.report(doc["data"])` reproduces it (tested).
 - [x] **FR-49** Exports go under `outputs/e13_labeler/exports/<timestamp>/`, never overwritten, with a manifest: app version, guideline versions, DB snapshot sha256, filters, per-file sha256 and rows. Audited.
-- [x] **FR-29** Gold create/edit/retire/promote, with explanation and acceptable alternatives, validated like labels (including the hard span rules). CLI: `gold list|import|promote|retire`; API: `/api/admin/gold`. Still needed (M2): a gold editor page.
+- [x] **FR-29** Gold create/edit/retire/promote, with explanation and acceptable alternatives, validated like labels (including the hard span rules). CLI: `gold list|import|promote|retire`; API: `/api/admin/gold`; in the UI, through adjudication ("Save + promote to gold"). A standalone gold editor page would still help (M3).
 - [x] **FR-54** `SINGLE_USER=1`: owner auto-login, loopback only, including when forwarded headers are spoofed **[eval #5]**.
 
 ### Owner re-label
@@ -69,13 +69,16 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 
 ## M2: multi-labeler
 
+Built 2026-10-05. Exit criteria (§10) still to meet in practice: two or more
+labelers finish one double-labelled batch, and per-reason α with CI is exported.
+
 ### Access control (§4.8, §8)
-- [~] **FR-50 / FR-57** Server-side clearance filter. Done for `next` (with the batch `tier_ceiling`), submit, skip, locks, flags, gold, agreement and exports (an admin's clearance limits what they see and export). A fuzz test covers every `/api` route. Still needed: history and quiz, when built.
-- [ ] **FR-51** Invites: single use, 7-day expiry, bound to a role and clearance; stored hashed. The `invites` table exists.
-- [~] **FR-52** Labeler management. Done: list and `revoke_sessions`. Still needed: pause, resume, revoke endpoint, clearance change (owner only), password reset, per-labeler stats.
-- [~] **FR-53** Audit log. Done: table, `create_owner`, `login`. Still needed: clearance changes, exports, imports, adjudications, gold edits.
-- [ ] **FR-58** Quiz and gold for `public` labelers must be libre; warn when there are fewer than 12 libre gold items.
-- [ ] **FR-60** Contributor agreement, versioned, accepted at first login.
+- [x] **FR-50 / FR-57** Server-side clearance filter on every item route: `next` (with the batch `tier_ceiling`), submit, skip, edit and history (with the batch's Jev filter, review §3.5), locks, flags, gold, quiz, adjudication, agreement and exports. A fuzz test covers every `/api` route.
+- [x] **FR-51** Invites: single use, 7-day expiry, bound to a role and clearance, stored hashed; only the owner invites admins or internal clearance. Registering without a valid token is 403.
+- [x] **FR-52** Labeler management: list with stats, pause, resume (back to onboarding unless a quiz was passed; the owner may skip it), revoke (ends sessions at once), clearance change (owner only), single-use reset links, `/api/admin/labelers/{p}/stats`.
+- [x] **FR-53** Audit log: logins, registrations, invites, status and clearance changes, resets, agreement acceptance, quiz results, imports, exports, backups, gold edits, adjudications, flag resolutions. Append-only (a trigger refuses updates and deletes).
+- [x] **FR-58** Quiz and hidden gold follow clearance, so `public` labelers get libre gold only; opening a batch warns when public labelers have fewer than 12 libre gold items.
+- [x] **FR-60** Contributor agreement (`contributor.py`), versioned, accepted before anything else; the owner is exempt. The text is a draft until §11 Q4 (licence) is settled.
 - [x] **FR-59** `permissions`, `source_license`, `text_included` and `label_provenance: "human"` on every training row; `permissions` on every annotation row.
 
 ### Security (NFR-5)
@@ -83,32 +86,32 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [x] Session tokens stored hashed (were plaintext).
 - [x] Cookies `HttpOnly` + `SameSite=Strict`; `Secure` via `COOKIE_SECURE=1`.
 - [x] Login rate limiting that can't be bypassed: forwarded headers are trusted only from `TRUSTED_PROXIES` **[eval #2]**.
-- [ ] CSRF tokens on mutating requests **[eval #3]**.
-- [ ] HTTPS deployment for external labelers (§11 Q5).
+- [x] CSRF tokens on mutating requests **[eval #3]**: `X-CSRF-Token` must match a token derived from the session (a per-process one in SINGLE_USER mode), read by JS from the `e13_csrf` cookie.
+- [~] HTTPS deployment for external labelers (§11 Q5): `deploy/Containerfile`, `deploy/compose.yaml` (Caddy, automatic certificates, fixed proxy address for `TRUSTED_PROXIES`), `docs/e13/DEPLOY.md`. Still needed: build the image and run the checklist once; no container runtime was available here.
 - [x] No hard-coded credentials: the owner comes from the CLI; the MCP default password is gone with `mcp_server/` **[eval #4]**.
 
 ### Onboarding and QA (§4.4)
-- [ ] **FR-26** Versioned guideline page, gate before the quiz.
-- [ ] **FR-27** Quiz with immediate feedback, a pass rule and one retake. The old training mode completed after 5 items whatever the accuracy; reuse its overlay CSS.
-- [ ] **FR-28** Hidden gold at 0.20 for the first 50 items, then 0.05; excluded from α and from training export.
-- [ ] **FR-30** Rolling gold accuracy; auto-pause and a retraining quiz.
+- [x] **FR-26** Versioned guideline page (`guideline.json`, a draft v1 with a positive and a near-miss example per reason; definitions and span rules come from the code). Opening it is recorded and gates the quiz; annotations record the version in force. `g` opens it while labelling.
+- [x] **FR-27** Quiz: 12 gold items covering every reason plus 2 answerable, feedback after each answer, pass at 75% (exact or Jaccard ≥ 0.8, alternatives honoured) with no established reason missed twice; one retake after re-reading the guideline, then the owner reviews.
+- [x] **FR-28** Hidden gold at 0.20 for the first 50 items, then 0.05, through an ordinary batch; never repeated or taken from the labeler's quiz; excluded from α and from training export. Owners get no probes.
+- [x] **FR-30** Rolling 30-probe gold accuracy since the last passed quiz; under 0.6 (after 10+ probes) pauses the account and `next` offers the retraining quiz.
 
 ### Batches and queue (§4.5)
 - [x] **FR-31** Batches: `overlap_target` 1..n (default 3, owner Q10), `tier_ceiling`, span policy, status, priority, note rule, a deterministic reliability subset (`reliability_fraction` × `reliability_overlap`) and re-label batches (`relabel_of`, `relabel_after_days`). Configurable via `python -m e13_labeler batch config|relabel` and `/api/admin/batches/{name}/config|relabel`. Opening a batch warns what its α will rest on.
 - [x] **FR-32** Overlap-aware `next`: complete pairs first, then priority, then random; per-item targets for the reliability subset; re-label batches as the one exception to "never twice". The property test (5 labelers) passes for overlap 1, 2 and 3. The old routing was breadth-first, the opposite **[eval, §2]**.
-- [ ] **FR-35** Progress and ETA.
-- [ ] **FR-21** Edit the last 20 submissions; versioned annotations.
+- [x] **FR-35** Progress and ETA: items at 0/1/2/3+ labels, % complete, labels remaining, ETA from the 24 h (else 7 d) pace; per labeler today/total/median active time.
+- [x] **FR-21** Edit the last 20 submissions (`e`), each edit a new version, until the batch closes; α and exports use the latest.
 
 ### Agreement, adjudication (§4.6)
-- [ ] **FR-39** Span token-F1/Jaccard per role and per reason; E07 AP with ≥ 3 labelers.
-- [~] **FR-41** Dashboard: candidates vs the min/median of established reasons, done. Still needed (M2): the confusion matrix between labeler pairs, and per-labeler gold accuracy and pairwise agreement.
+- [x] **FR-39** Span token-F1/Jaccard (word units) per role and per triggering reason; leave-one-out AP with ≥ 3 labelers (`spans_agreement.py`). To do: check the AP against E07's own implementation, which isn't in this repo.
+- [x] **FR-41** Dashboard: candidates vs the min/median of established reasons, the reason confusion matrix between labeler pairs (plus co-occurrence), per-labeler gold accuracy (overall, per reason, rolling) and pairwise agreement. All of it in the agreement export, reproducible from its `data`.
 - [x] **FR-42** "α unstable" warning (< 30 positives or < 3% prevalence), on the dashboard and in the CLI.
-- [ ] **FR-43** Adjudication queue, anonymised L-a/L-b, stored separately from raw labels.
-- [~] **FR-44** Flags. Done: API, admin list and the `f` key. Still needed: resolving flags.
-- [ ] §7.3 monitoring: flag median active time < 5 s and reason prevalence above 3× the batch rate.
+- [x] **FR-43** Adjudication queue (most disagreements first), labels side by side as L-a/L-b in an item-specific order, internal admins only, versioned results stored apart from raw labels, "Save + promote to gold"; the training export's `adjudicated` carries the latest.
+- [x] **FR-44** Flags: API, admin list, the `f` key, and resolve/dismiss with a note.
+- [x] §7.3 monitoring: median active time < 5 s and reason prevalence above 3× the batch rate are flagged on the dashboard and in the CLI.
 
 ### Operations
-- [~] **NFR-6** WAL is on. Still needed: nightly online backup to `outputs/e13_labeler/backups/`; a no-hard-delete policy in code.
+- [x] **NFR-6** WAL; online backups (`backup.py`: at start-up when the newest is over 24 h old, then hourly checks; `python -m e13_labeler backup`; owner `POST /api/admin/backup`), integrity-checked and never deleted; triggers refuse deletes of items, labelers, labels, spans, gold, adjudications, flags, quiz data and the audit log.
 - [x] **NFR-7** The app version and git commit are recorded per annotation; the export manifest records the DB checksum.
 - [x] **NFR-10** One `run.sh`, configured by env vars. It binds 127.0.0.1 unless `HOST` is set (the old script bound `0.0.0.0` with `--reload`).
 
@@ -124,7 +127,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 ## Cross-cutting
 
 - [x] **NFR-3** No CDN or build step. Tested.
-- [~] **NFR-8** Tests run offline **[eval #6]**. Still needed: tests for every MUST FR, a blindness test, a tier fuzz test and the assignment property test. The α reference test is done.
+- [~] **NFR-8** Tests run offline **[eval #6]**: the blindness test, the tier fuzz test, the assignment property test and the α reference test are in, and every MUST FR's stated test has a pytest except the browser-only ones (FR-3 render, FR-18 drag, FR-22 hidden tab), which have Playwright smoke scripts in `tests/e2e/` but no automated harness yet.
 - [x] **NFR-4** Pseudonyms (`L01`, …); contact details only in the owner-only `identity` table.
 - [~] **NFR-1** `next`/submit p95 < 200 ms with 50k items and 10 labelers. Schema v3 indexes `annotations(item_id, …)`; a full queue pass over the 695-item sample went from 49 s to 13 s. Still needed: a 50k-item benchmark, and replacing `ORDER BY RANDOM()` full scans.
 - [ ] **NFR-2** Answerable item in one keystroke plus Enter; median ≤ 20 s (measure in the pilot).
@@ -149,10 +152,10 @@ Fixed in this round:
 - [x] §8 A tier fuzz test covers every `/api` route with a public session (FR-57).
 
 Still open from the review:
-- [ ] §3.5 The `show_model_answer` Jev exception is enforced in `next` and submit (via `_batch_filter`). History and export must use the same filter when they land (FR-21, FR-45).
+- [~] §3.5 The `show_model_answer` Jev exception is enforced in `next`, submit, history and edit (via `_batch_filter`). Exports and the agreement report filter by the exporter's clearance only; give them the same Jev filter when FR-34 (`show_model_answer` batches, M3) lands.
 - [x] §2 Finish M1: FR-29, FR-9, FR-37 DB wiring, FR-45/46/48/49 and the dashboard table are all done.
 - [~] §8 The FR-5 round trip is done. Still needed: FR-3 render tests (needs a browser test harness).
-- [ ] §5 CSRF tokens (M2; SameSite=Strict plus JSON-only bodies mitigate this meanwhile).
+- [x] §5 CSRF tokens (M2).
 
 ## Schema drift to watch (from `docs/e13/fixtures/README.md`, "Hedging")
 

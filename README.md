@@ -11,10 +11,12 @@ sample for experiment E13 (abstain-reason label quality).
   annotation; final state at commit `72c9bbb`). Its FastAPI backbone and styles
   were kept; see [`docs/e13/E13_CODEBASE_EVALUATION.md`](docs/e13/E13_CODEBASE_EVALUATION.md).
 
-**Status:** milestone M1 (owner-only MVP) is complete: import, the labelling
-screen, batches (overlap 1..n, reliability subset, re-label passes), model
-pseudo-labelers, gold, per-reason α and the exports. M2 (multi-labeler:
-invites, quiz, hidden gold, adjudication) is next; see `ROADMAP.md`.
+**Status:** milestones M1 (owner-only MVP) and M2 (multi-labeler) are built:
+import, the labelling screen, batches (overlap 1..n, reliability subset,
+re-label passes), model pseudo-labelers, gold, per-reason α and the exports;
+then invites, the contributor agreement, the guideline and quiz, hidden gold
+with auto-pause, edits, progress, adjudication, span agreement, CSRF, backups
+and an HTTPS deployment. What is left is in `ROADMAP.md`.
 
 ## Setup
 
@@ -43,6 +45,30 @@ uv run python -m e13_labeler gold promote ITEM_ID --from L01     # seed gold fro
 uv run python -m e13_labeler export                              # outputs/e13_labeler/exports/<timestamp>/
 ```
 
+## Bringing in other labelers (M2)
+
+1. **Gold for the quiz.** The quiz needs at least 12 gold items: each reason at
+   least once (both candidates included) plus two `answerable` ones. Public
+   labelers only ever see libre gold, so they need 12 libre ones (opening a
+   batch warns otherwise). Seed gold from the pilot (`gold promote`), from
+   adjudication ("Save + promote to gold"), or with `gold import FILE`.
+2. **Revise the guideline.** Edit `e13_labeler/guideline.json` (definitions and
+   span rules come from the code) and bump its `version`. Annotations record it.
+3. **Invite.** Admin tab → Labelers → Invite. The link is shown once, works
+   once and expires after 7 days. Only the owner invites admins or gives
+   internal clearance.
+4. The new labeler opens the link, picks a login, accepts the contributor
+   agreement, reads the guideline and takes the quiz. Passing makes them
+   active; one retake is allowed, then the owner decides (Resume).
+5. While they label, hidden gold runs at 20% for their first 50 items and 5%
+   after. A rolling gold accuracy under 0.6 pauses them and sends them to a
+   retraining quiz.
+6. **Adjudicate** disagreements on the Admin tab (internal admins). Results are
+   stored apart from the raw labels; α never changes.
+
+Labelers press `e` to reopen one of their last 20 submissions; each edit is a
+new version.
+
 The export directory holds `annotations.jsonl` (§5.4), `training.jsonl` (§5.5),
 `agreement.json` (every number plus its inputs), `items.jsonl` (the pool format,
 which re-imports byte-identically) and `manifest.json`. The JSON Schemas are in
@@ -54,12 +80,24 @@ Set environment variables. The full list is in [`e13_labeler/config.py`](e13_lab
 
 | variable | default | meaning |
 |---|---|---|
-| `E13_DB` | `outputs/e13_labeler/e13.db` | SQLite database |
+| `E13_OUTPUTS` | `outputs/e13_labeler` | database, exports and backups |
+| `E13_DB` | `$E13_OUTPUTS/e13.db` | SQLite database |
 | `SINGLE_USER` | `0` | owner auto-login, loopback only |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | bind address for `run.sh` |
-| `LOCK_TIMEOUT_MINUTES` | `20` | item lock lifetime |
-| `COOKIE_SECURE` | `0` | set to `1` behind HTTPS |
+| `ALLOWED_HOSTS` | any (loopback in `SINGLE_USER`) | the `Host` names the app answers |
+| `COOKIE_SECURE` | `1` (`0` in `SINGLE_USER`) | `0` only for plain-HTTP tests on a trusted LAN |
 | `TRUSTED_PROXIES` | (none) | proxies whose `X-Forwarded-For` is believed |
+| `LOCK_TIMEOUT_MINUTES` | `20` | item lock lifetime |
+| `BACKUP_INTERVAL_HOURS` | `24` | online backup when the newest is older (`0`: off) |
+| `E13_GOLD_RATE_NEW` / `E13_GOLD_RATE` | `0.20` / `0.05` | hidden gold share, first 50 items / after |
+| `E13_GOLD_THRESHOLD` | `0.6` | rolling gold accuracy that pauses a labeler |
+| `E13_QUIZ_SIZE` | `12` | quiz items |
+
+## Deploying for external labelers
+
+External labelers need HTTPS. `deploy/` holds a Containerfile and a compose
+file that put the app behind Caddy, which gets a certificate automatically:
+see [`docs/e13/DEPLOY.md`](docs/e13/DEPLOY.md).
 
 ## Tests
 

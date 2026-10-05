@@ -46,6 +46,7 @@ from .auth import (
     labeler_dict,
     require_active,
     require_admin,
+    require_owner,
     utcnow,
     verify_password,
 )
@@ -109,8 +110,15 @@ TAGS_METADATA = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+
+    from .backup import backup_loop, interval_hours
+
     init_db()
+    task = asyncio.create_task(backup_loop()) if interval_hours() > 0 else None  # NFR-6
     yield
+    if task:
+        task.cancel()
 
 
 app = FastAPI(
@@ -1255,6 +1263,44 @@ async def adjudication_save(item_id: str, body: AdjudicationIn, admin: dict = De
             conn, item_id, admin, answerable=body.answerable, reasons=body.reasons,
             spans=[s.model_dump() for s in body.spans], note=body.note, promote=body.promote,
             explanation=body.explanation, alternatives=body.alternatives, filters=_admin_filters(admin)))
+
+
+class ImportIn(BaseModel):
+    filename: str = Field(..., max_length=200, description="Shown in the import log")
+    content: str = Field(..., max_length=64 * 1024 * 1024, description="The JSONL text (pool format, §5.2)")
+    batch: Optional[str] = Field(None, max_length=100, description="Add the items to this batch (created if new)")
+    replace: bool = False
+
+
+@app.post("/api/admin/import", tags=["Admin"], summary="Import pool JSONL")
+async def admin_import(body: ImportIn, admin: dict = Depends(require_admin)):
+    """
+    FR-11 from the browser: the same importer as the CLI. Lowering a tier
+    (``--allow-lower-tier``) stays CLI-only, for the owner.
+    """
+    import hashlib
+
+    from .importer import import_rows
+
+    data = body.content.encode("utf-8")
+    with get_db() as conn:
+        report = import_rows(conn, body.content.splitlines(), f"upload:{body.filename}",
+                             hashlib.sha256(data).hexdigest(), batch=body.batch or None, replace=body.replace,
+                             actor_id=admin["id"], actor=admin["pseudonym"])
+    out = report.as_dict()
+    out["errors"] = [{"line": n, "error": e} for n, e in out["errors"][:200]]
+    return out
+
+
+@app.post("/api/admin/backup", tags=["Admin"], summary="Back up the database now")
+async def admin_backup(admin: dict = Depends(require_owner)):
+    """NFR-6: an online backup to outputs/e13_labeler/backups/ (the server also does this nightly)."""
+    from .backup import backup
+
+    result = backup()
+    with get_db() as conn:
+        audit(conn, admin["id"], "backup", result["path"], {"sha256": result["sha256"]})
+    return result
 
 
 class ExportIn(BaseModel):
