@@ -4,11 +4,12 @@ Command-line entry point.
     python -m e13_labeler init-db
     python -m e13_labeler create-owner [--login NAME]
     python -m e13_labeler import FILE [--batch NAME] [--replace] [--allow-lower-tier]
-    python -m e13_labeler batch {list|open|close|draft} [NAME]
+    python -m e13_labeler batch {list | open|close|draft NAME | config NAME ... | relabel NAME NEW ...}
     python -m e13_labeler serve [--host 127.0.0.1] [--port 8000] [--reload]
 """
 
 import argparse
+import json
 import getpass
 import os
 import sys
@@ -70,29 +71,39 @@ def cmd_import(args) -> int:
 
 
 def cmd_batch(args) -> int:
-    """List batches, or change one's status (FR-31)."""
-    from .batches import set_status
+    """Batches (FR-31): list, open/close, configure overlap and the reliability subset, re-label."""
+    from . import batches
 
     init_db()
-    with get_db() as conn:
-        if args.action == "list":
-            for r in conn.execute(
-                """SELECT b.name, b.status, b.overlap_target, b.tier_ceiling,
-                          (SELECT COUNT(*) FROM batch_items WHERE batch_id = b.id) AS n
-                   FROM batches b ORDER BY b.id"""
-            ):
-                print(f"{r['name']}\t{r['status']}\titems={r['n']}\toverlap={r['overlap_target']}"
-                      f"\tceiling={r['tier_ceiling']}")
-            return 0
-        if not args.name:
-            print("A batch name is required", file=sys.stderr)
-            return 2
-        try:
-            set_status(conn, args.name, args.action)
-        except ValueError as e:
-            print(e, file=sys.stderr)
-            return 1
-    print(f"{args.name}: {args.action}")
+    try:
+        with get_db() as conn:
+            if args.action == "list":
+                for b in conn.execute("SELECT * FROM batches ORDER BY id").fetchall():
+                    d = batches.describe(conn, b)
+                    extra = (f"relabel_of={d['relabel_of']} after={d['relabel_after_days']}d" if d["relabel_of"]
+                             else f"overlap={d['overlap_target']} subset={d['reliability_subset']}"
+                                  f"@{d['reliability_overlap']}")
+                    print(f"{d['name']}\t{d['status']}\titems={d['n_items']}\t{extra}\tceiling={d['tier_ceiling']}")
+                return 0
+            if args.action in ("open", "close", "draft"):
+                status = {"close": "closed"}.get(args.action, args.action)
+                for warning in batches.set_status(conn, args.name, status):
+                    print(f"note: {warning}", file=sys.stderr)
+                print(f"{args.name}: {status}")
+            elif args.action == "config":
+                result = batches.configure(
+                    conn, args.name, overlap_target=args.overlap, reliability_fraction=args.reliability,
+                    reliability_overlap=args.reliability_overlap, priority=args.priority,
+                    tier_ceiling=args.tier_ceiling, require_note=args.require_note,
+                    relabel_after_days=args.after_days)
+                print(json.dumps(result))
+            elif args.action == "relabel":
+                result = batches.create_relabel(conn, args.name, args.new_name, fraction=args.fraction,
+                                                after_days=args.after_days if args.after_days is not None else 7)
+                print(json.dumps(result))
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 1
     return 0
 
 
@@ -127,11 +138,26 @@ def main(argv=None) -> int:
                    help="owner only: let a replacement lower an item's permissions tier (logged)")
     p.set_defaults(func=cmd_import)
 
-    p = sub.add_parser("batch", help="list batches or set a batch's status")
-    p.add_argument("action", choices=["list", "open", "close", "draft"])
-    p.add_argument("name", nargs="?")
-    p.set_defaults(func=lambda a: cmd_batch(argparse.Namespace(
-        action={"close": "closed"}.get(a.action, a.action), name=a.name)))
+    p = sub.add_parser("batch", help="list, open/close, configure or re-label batches")
+    bsub = p.add_subparsers(dest="action", required=True)
+    bsub.add_parser("list", help="list batches")
+    for action in ("open", "close", "draft"):
+        bsub.add_parser(action, help=f"{action} a batch").add_argument("name")
+    c = bsub.add_parser("config", help="set overlap, reliability subset, priority, ...")
+    c.add_argument("name")
+    c.add_argument("--overlap", type=int, help="labelers per item (1..n; 3 is ideal)")
+    c.add_argument("--reliability", type=float, help="share of items in the reliability subset (0..1)")
+    c.add_argument("--reliability-overlap", type=int, help="labelers per item in the subset (>= 2)")
+    c.add_argument("--priority", type=int)
+    c.add_argument("--tier-ceiling")
+    c.add_argument("--require-note", action=argparse.BooleanOptionalAction, default=None)
+    c.add_argument("--after-days", type=int, help="re-label batches: minimum gap in days")
+    r = bsub.add_parser("relabel", help="create an intra-rater re-label batch over a batch")
+    r.add_argument("name", help="source batch")
+    r.add_argument("new_name", help="name of the re-label batch")
+    r.add_argument("--fraction", type=float, help="sample of the source (default: its subset, else all)")
+    r.add_argument("--after-days", type=int, help="minimum gap before an item comes back (default 7)")
+    p.set_defaults(func=cmd_batch)
 
     p = sub.add_parser("serve", help="run the web app")
     p.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))

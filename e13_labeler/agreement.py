@@ -18,7 +18,7 @@ Conventions:
 import random
 from collections import Counter
 from itertools import permutations
-from typing import Hashable, Iterable, Mapping, Optional, Sequence
+from typing import Callable, Hashable, Iterable, Mapping, Optional, Sequence
 
 Unit = Sequence[Optional[Hashable]]
 
@@ -109,35 +109,53 @@ def describe(units: Sequence[Unit], n_boot: int = 1000, seed: int = 0) -> dict:
     }
 
 
-def reason_units(annotations: Iterable[Mapping], reason: str) -> list[list]:
+def by_item(ann: Mapping) -> Hashable:
+    """Inter-rater units: one unit per item, one value per labeler."""
+    return ann["item_id"]
+
+
+def by_item_and_labeler(ann: Mapping) -> Hashable:
     """
-    Group annotations by item into units for one reason. Each annotation is a
-    mapping with ``item_id`` and ``reasons`` ({reason: True | False | None}),
-    as in the §5.4 export. Pass only the latest version per (item, labeler).
+    Intra-rater units (re-label batches): one unit per (item, labeler), one value
+    per pass. Report this α apart from inter-rater α; it measures consistency,
+    not agreement between people.
     """
-    by_item: dict[str, list] = {}
+    return ann["item_id"], ann["labeler"]
+
+
+def reason_units(annotations: Iterable[Mapping], reason: str,
+                 unit_key: Callable[[Mapping], Hashable] = by_item) -> list[list]:
+    """
+    Group annotations into units for one reason. Each annotation is a mapping with
+    ``item_id``, ``labeler`` and ``reasons`` ({reason: True | False | None}), as in
+    the §5.4 export. Pass only the latest version per (item, labeler, batch).
+    Single-labelled items form units of one value and drop out of α (unpairable).
+    """
+    units: dict = {}
     for ann in annotations:
         if ann.get("skipped"):
             continue
         value = (ann.get("reasons") or {}).get(reason)
-        by_item.setdefault(ann["item_id"], []).append(value)
-    return list(by_item.values())
+        units.setdefault(unit_key(ann), []).append(value)
+    return list(units.values())
 
 
-def any_abstain_units(annotations: Iterable[Mapping]) -> list[list]:
+def any_abstain_units(annotations: Iterable[Mapping],
+                      unit_key: Callable[[Mapping], Hashable] = by_item) -> list[list]:
     """Units for "any abstain" (FR-38): True when the labeler did not choose answerable."""
-    by_item: dict[str, list] = {}
+    units: dict = {}
     for ann in annotations:
         if ann.get("skipped") or ann.get("answerable") is None:
             continue
-        by_item.setdefault(ann["item_id"], []).append(not ann["answerable"])
-    return list(by_item.values())
+        units.setdefault(unit_key(ann), []).append(not ann["answerable"])
+    return list(units.values())
 
 
 def reason_alphas(
-    annotations: Sequence[Mapping], reasons: Sequence[str], n_boot: int = 1000, seed: int = 0
+    annotations: Sequence[Mapping], reasons: Sequence[str], n_boot: int = 1000, seed: int = 0,
+    unit_key: Callable[[Mapping], Hashable] = by_item,
 ) -> dict:
     """Per-reason α (FR-37) plus "any abstain" (FR-38) for a set of annotations."""
-    result = {r: describe(reason_units(annotations, r), n_boot=n_boot, seed=seed) for r in reasons}
-    result["any_abstain"] = describe(any_abstain_units(annotations), n_boot=n_boot, seed=seed)
+    result = {r: describe(reason_units(annotations, r, unit_key), n_boot=n_boot, seed=seed) for r in reasons}
+    result["any_abstain"] = describe(any_abstain_units(annotations, unit_key), n_boot=n_boot, seed=seed)
     return result

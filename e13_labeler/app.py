@@ -44,6 +44,7 @@ from .auth import (
     utcnow,
     verify_password,
 )
+from . import batches as batches_mod
 from .batches import set_status
 from .db import audit, get_db, init_db
 from .labelling import (
@@ -217,22 +218,24 @@ def fetch_visible_item(conn, item_id: str, labeler: dict):
     return row
 
 
-def acquire_lock(conn, item_id: str, labeler_id: int) -> Optional[str]:
+def acquire_lock(conn, item_id: str, labeler_id: int, batch_id: Optional[int] = None) -> Optional[str]:
     """
     Lock an item for a labeler, or extend their own lock. Returns the expiry,
     or None if someone else holds a live lock. A single upsert, so two labelers
-    racing for the same item can't both win.
+    racing for the same item can't both win. ``batch_id`` records which batch
+    served it, so the submit lands there.
     """
     now = utcnow()
     until = iso(now + timedelta(minutes=config.LOCK_TIMEOUT_MINUTES))
     cur = conn.execute(
-        """INSERT INTO locks (item_id, labeler_id, until, served_at) VALUES (?, ?, ?, ?)
+        """INSERT INTO locks (item_id, labeler_id, until, served_at, batch_id) VALUES (?, ?, ?, ?, ?)
            ON CONFLICT(item_id) DO UPDATE SET
                served_at = CASE WHEN locks.labeler_id = excluded.labeler_id AND locks.until > ?
                                 THEN locks.served_at ELSE excluded.served_at END,
+               batch_id = COALESCE(excluded.batch_id, locks.batch_id),
                labeler_id = excluded.labeler_id, until = excluded.until
            WHERE locks.labeler_id = excluded.labeler_id OR locks.until <= ?""",
-        (item_id, labeler_id, until, iso(now), iso(now), iso(now)),
+        (item_id, labeler_id, until, iso(now), batch_id, iso(now), iso(now)),
     )
     return until if cur.rowcount else None
 
@@ -519,15 +522,6 @@ def _batch_filter(batch, labeler: dict) -> tuple[str, list]:
     return sql, params
 
 
-def _allowed_in_batch(conn, item_id: str, batch, labeler: dict) -> bool:
-    sql, params = _batch_filter(batch, labeler)
-    return conn.execute(
-        f"""SELECT 1 FROM batch_items bi JOIN items i ON i.item_id = bi.item_id
-            WHERE bi.batch_id = ? AND i.item_id = ? AND {sql}""",
-        (batch["id"], item_id, *params),
-    ).fetchone() is not None
-
-
 def _human_label_count_sql() -> str:
     # Labels that count toward the overlap target: human, not skipped, not gold probes.
     return """(SELECT COUNT(DISTINCT a.labeler_id) FROM annotations a JOIN labelers h ON a.labeler_id = h.id
@@ -535,41 +529,72 @@ def _human_label_count_sql() -> str:
                  AND a.is_gold_probe = 0 AND h.kind = 'human')"""
 
 
+def _eligible_sql(batch, labeler: dict) -> tuple[str, list]:
+    """
+    SQL over ``i`` (item), ``bi`` (batch item), ``b`` (batch) for items this
+    labeler may label in this batch, apart from locks.
+
+    Ordinary batch (FR-32): never labelled or skipped by this labeler in any
+    batch, and below the item's overlap target (its reliability-subset target,
+    else the batch's overlap_target).
+
+    Re-label batch: the one deliberate exception to "never twice". Only items this
+    labeler labelled (not skipped) in the source batch at least relabel_after_days
+    ago, and not yet in this batch.
+    """
+    sql, params = _batch_filter(batch, labeler)
+    if batch["relabel_of"] is None:
+        sql += f"""
+            AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.item_id = i.item_id AND a.labeler_id = ?)
+            AND {_human_label_count_sql()} < COALESCE(bi.target, b.overlap_target)"""
+        params.append(labeler["id"])
+    else:
+        sql += """
+            AND EXISTS (SELECT 1 FROM annotations a WHERE a.item_id = i.item_id AND a.labeler_id = ?
+                        AND a.batch_id = b.relabel_of AND a.skipped_code IS NULL
+                        AND a.created_at <= datetime('now', ?))
+            AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.item_id = i.item_id AND a.labeler_id = ?
+                            AND a.batch_id = b.id)"""
+        params += [labeler["id"], f"-{int(batch['relabel_after_days'])} days", labeler["id"]]
+    return sql, params
+
+
+def _eligible(conn, item_id: str, batch, labeler: dict) -> bool:
+    sql, params = _eligible_sql(batch, labeler)
+    return conn.execute(
+        f"""SELECT 1 FROM batch_items bi JOIN batches b ON b.id = bi.batch_id JOIN items i ON i.item_id = bi.item_id
+            WHERE b.id = ? AND i.item_id = ? AND {sql}""",
+        (batch["id"], item_id, *params),
+    ).fetchone() is not None
+
+
 def pick_next(conn, labeler: dict):
     """
-    FR-32: an item in an open batch, within the labeler's clearance and the batch
-    ceiling, never labelled or skipped by this labeler (in any batch), not locked
-    by someone else, and below its overlap target. Items that already have labels
-    from others come first (complete pairs early), then batch priority, then random.
-    A labeler who still holds a lock gets that item back.
+    FR-32: an eligible item (see _eligible_sql) in an open batch that nobody else
+    has locked. Items that already have labels from others come first (complete
+    pairs early, so α accrues), then batch priority, then random. A labeler who
+    still holds a lock on an eligible item gets that item back.
     """
     now = iso(utcnow())
-    held = conn.execute(
-        """SELECT i.*, b.id AS batch_id FROM locks k JOIN items i ON i.item_id = k.item_id
-           JOIN batch_items bi ON bi.item_id = i.item_id JOIN batches b ON b.id = bi.batch_id
-           WHERE k.labeler_id = ? AND k.until > ? AND b.status = 'open'
-             AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.item_id = i.item_id AND a.labeler_id = ?)
-           ORDER BY k.served_at LIMIT 1""",
-        (labeler["id"], now, labeler["id"]),
-    ).fetchone()
-    if held:
-        batch = conn.execute("SELECT * FROM batches WHERE id = ?", (held["batch_id"],)).fetchone()
-        if _allowed_in_batch(conn, held["item_id"], batch, labeler):
-            return held, batch
+    for held in conn.execute(
+        "SELECT item_id, batch_id FROM locks WHERE labeler_id = ? AND until > ? ORDER BY served_at",
+        (labeler["id"], now),
+    ).fetchall():
+        for batch in _open_batches(conn):
+            if held["batch_id"] in (None, batch["id"]) and _eligible(conn, held["item_id"], batch, labeler):
+                return conn.execute("SELECT * FROM items WHERE item_id = ?", (held["item_id"],)).fetchone(), batch
 
     best = None
     for batch in _open_batches(conn):
-        allowed_sql, allowed_params = _batch_filter(batch, labeler)
+        sql, params = _eligible_sql(batch, labeler)
         row = conn.execute(
             f"""SELECT i.*, {_human_label_count_sql()} AS n_labels
                 FROM batch_items bi JOIN batches b ON b.id = bi.batch_id JOIN items i ON i.item_id = bi.item_id
-                WHERE b.id = ? AND {allowed_sql}
-                  AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.item_id = i.item_id AND a.labeler_id = ?)
+                WHERE b.id = ? AND {sql}
                   AND NOT EXISTS (SELECT 1 FROM locks k WHERE k.item_id = i.item_id
                                   AND k.labeler_id != ? AND k.until > ?)
-                  AND n_labels < b.overlap_target
                 ORDER BY n_labels > 0 DESC, RANDOM() LIMIT 1""",
-            (batch["id"], *allowed_params, labeler["id"], labeler["id"], now),
+            (batch["id"], *params, labeler["id"], now),
         ).fetchone()
         if row is None:
             continue
@@ -590,7 +615,7 @@ def blind_payload(conn, item, batch, labeler: dict, lock_until: str) -> dict:
     complete = conn.execute(
         f"""SELECT COUNT(*) FROM batch_items bi JOIN items i ON i.item_id = bi.item_id
             JOIN batches b ON b.id = bi.batch_id
-            WHERE b.id = ? AND {_human_label_count_sql()} >= b.overlap_target""",
+            WHERE b.id = ? AND {_human_label_count_sql()} >= COALESCE(bi.target, b.overlap_target)""",
         (batch["id"],),
     ).fetchone()[0]
     return {
@@ -626,25 +651,30 @@ async def next_item(labeler: dict = Depends(get_current_labeler)):
         item, batch = pick_next(conn, labeler)
         if item is None:
             raise HTTPException(404, "No items to label right now")
-        until = acquire_lock(conn, item["item_id"], labeler["id"])
+        until = acquire_lock(conn, item["item_id"], labeler["id"], batch["id"])
         if until is None:  # lost a race for the lock; the client just asks again
             raise HTTPException(409, "Item was just taken; request the next one")
         return blind_payload(conn, item, batch, labeler, until)
 
 
 def _assignment(conn, item_id: str, labeler: dict):
-    """The item and its open batch for a submission, enforcing visibility, lock and once-only."""
+    """The item and the open batch a submission belongs to, enforcing visibility, lock and eligibility."""
     item = fetch_visible_item(conn, item_id, labeler)
     lock = get_lock_status(conn, item_id)
     if lock and lock["labeler_id"] != labeler["id"]:
         raise HTTPException(409, f"Item is locked by {lock['pseudonym']}")
+    served = conn.execute("SELECT batch_id FROM locks WHERE item_id = ? AND labeler_id = ?",
+                          (item_id, labeler["id"])).fetchone()
+    batches = _open_batches(conn)
+    if served and served["batch_id"] is not None:
+        batches = sorted(batches, key=lambda b: b["id"] != served["batch_id"])  # the serving batch first
+    for batch in batches:
+        if _eligible(conn, item_id, batch, labeler):
+            return item, batch
     if conn.execute("SELECT 1 FROM annotations WHERE item_id = ? AND labeler_id = ?",
                     (item_id, labeler["id"])).fetchone():
         raise HTTPException(409, "You have already labelled or skipped this item")
-    for batch in _open_batches(conn):
-        if _allowed_in_batch(conn, item_id, batch, labeler):
-            return item, batch
-    raise HTTPException(404, f"Item {item_id} is not in an open batch")
+    raise HTTPException(404, f"Item {item_id} is not in an open batch for you")
 
 
 def _wall_ms(conn, item_id: str, labeler_id: int) -> Optional[int]:
@@ -724,26 +754,56 @@ async def skip_item(body: SkipIn, labeler: dict = Depends(get_current_labeler)):
 # API Endpoints - Batches
 # ============================================================================
 
+class BatchConfig(BaseModel):
+    overlap_target: Optional[int] = Field(None, ge=1, description="Labelers per item (1 to n; 3 is ideal)")
+    reliability_fraction: Optional[float] = Field(None, ge=0, le=1, description="Share of items given more labelers")
+    reliability_overlap: Optional[int] = Field(None, ge=2, description="Labelers per item in the reliability subset")
+    priority: Optional[int] = None
+    tier_ceiling: Optional[str] = None
+    require_note: Optional[bool] = None
+    relabel_after_days: Optional[int] = Field(None, ge=0, description="Re-label batches: minimum gap in days")
+
+
+class RelabelIn(BaseModel):
+    name: str = Field(..., description="Name of the new re-label batch")
+    fraction: Optional[float] = Field(None, ge=0, le=1, description="Sample of the source's items (default: its "
+                                                                    "reliability subset, else all)")
+    after_days: int = Field(7, ge=0)
+
+
 @app.get("/api/admin/batches", tags=["Admin"], summary="List batches")
 async def list_batches(admin: dict = Depends(require_admin)):
     with get_db() as conn:
-        rows = conn.execute(
-            """SELECT b.*, (SELECT COUNT(*) FROM batch_items WHERE batch_id = b.id) AS n_items
-               FROM batches b ORDER BY b.id"""
-        ).fetchall()
-    return {"batches": [
-        {"name": r["name"], "status": r["status"], "task_type": r["task_type"], "n_items": r["n_items"],
-         "overlap_target": r["overlap_target"], "tier_ceiling": r["tier_ceiling"], "priority": r["priority"],
-         "reason_set": json.loads(r["reason_set_json"]), "require_note": bool(r["require_note"])}
-        for r in rows
-    ]}
+        return {"batches": [batches_mod.describe(conn, b)
+                            for b in conn.execute("SELECT * FROM batches ORDER BY id").fetchall()]}
+
+
+@app.post("/api/admin/batches/{name}/config", tags=["Admin"], summary="Configure a batch")
+async def configure_batch(name: str, body: BatchConfig, admin: dict = Depends(require_admin)):
+    """Overlap, reliability subset, priority, tier ceiling, note rule (FR-31). Re-samples the subset."""
+    with get_db() as conn:
+        try:
+            return batches_mod.configure(conn, name, admin["id"], **body.model_dump())
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+
+
+@app.post("/api/admin/batches/{name}/relabel", tags=["Admin"], summary="Create a re-label batch")
+async def relabel_batch(name: str, body: RelabelIn, admin: dict = Depends(require_admin)):
+    """Intra-rater pass: labelers get their own items from batch ``name`` again, blind, after a gap."""
+    with get_db() as conn:
+        try:
+            return batches_mod.create_relabel(conn, name, body.name, fraction=body.fraction,
+                                              after_days=body.after_days, actor_id=admin["id"])
+        except ValueError as e:
+            raise HTTPException(422, str(e))
 
 
 @app.post("/api/admin/batches/{name}/status", tags=["Admin"], summary="Open or close a batch")
 async def set_batch_status(name: str, status: str = Body(..., embed=True), admin: dict = Depends(require_admin)):
     with get_db() as conn:
         try:
-            set_status(conn, name, status, admin["id"])
+            warnings = set_status(conn, name, status, admin["id"])
         except ValueError as e:
             raise HTTPException(422, str(e))
-    return {"name": name, "status": status}
+    return {"name": name, "status": status, "warnings": warnings}

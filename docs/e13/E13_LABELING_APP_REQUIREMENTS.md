@@ -32,6 +32,12 @@
 >    never whether it did (no world knowledge); the dated or time-sensitive phrase is the required span.
 >    `false_premise` is judged against the state only. The app shows every item's as-of date, so generated items
 >    don't stand out.
+> 5. **Overlap (§11 Q10, FR-31, FR-32):** "3 is ideal, but we might have to make 1 work." `overlap_target` is
+>    1..n, default 3 (this replaces "default 2, minimum 2"). With overlap 1, agreement comes from (a) a deterministic
+>    **reliability subset** (`reliability_fraction` of items labelled by `reliability_overlap` ≥ 2 people), (b) a
+>    **re-label batch** (`relabel_of`): the same labeler labels a sample of their own items again, blind, after
+>    `relabel_after_days`, the only exception to "never see an item twice", which gives *intra*-rater α, reported
+>    apart from inter-rater α; and (c) human-vs-committee α (FR-9). Single-labelled items are training data, not α data.
 **Experiment:** E13 abstain-reason label quality (`ROADMAP_V3.md` §7).
 **Related:**
 - `ROADMAP_V3.md` §2 (abstention sources) and §7 (the E13 entry);

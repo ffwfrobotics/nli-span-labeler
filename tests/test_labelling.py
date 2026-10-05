@@ -369,14 +369,16 @@ class TestSkip:
 
 
 class TestBatches:
-    def test_cannot_open_below_overlap_two(self, db):
-        """FR-31 (the schema also enforces overlap_target >= 2)."""
+    def test_overlap_must_be_positive(self, db):
+        """Overlap 1 is allowed (owner, 2026-10-05: 'we might have to make 1 work'); 0 is not."""
         import sqlite3
 
         from e13_labeler.db import get_db
 
         with get_db() as conn, pytest.raises(sqlite3.IntegrityError):
-            conn.execute("INSERT INTO batches (name, reason_set_json, overlap_target) VALUES ('x', '[]', 1)")
+            conn.execute("INSERT INTO batches (name, reason_set_json, overlap_target) VALUES ('x', '[]', 0)")
+        with get_db() as conn:
+            conn.execute("INSERT INTO batches (name, reason_set_json, overlap_target) VALUES ('y', '[]', 1)")
 
     def test_admin_opens_and_lists(self, db, owner_client: TestClient):
         from e13_labeler.db import get_db
@@ -391,19 +393,22 @@ class TestBatches:
 
 
 class TestAssignment:
-    def test_property_five_labelers_two_hundred_items(self, db, fresh_client: TestClient):
+    @pytest.mark.parametrize("overlap", [1, 2, 3])
+    def test_property_five_labelers_two_hundred_items(self, db, fresh_client: TestClient, overlap):
         """
         FR-32: with 5 labelers over 200 items, no labeler gets an item twice, and
-        every item ends with exactly overlap_target labels.
+        every item ends with exactly overlap_target labels, for overlap 1 to 3.
         """
-        from e13_labeler.batches import set_status
+        from e13_labeler.batches import configure, set_status
         from e13_labeler.db import get_db
         from e13_labeler.importer import import_rows
 
+        n_items = 200 if overlap == 2 else 60  # the spec's case at full size; the others smaller
         rows = [json.dumps({"id": f"snli/p/{i}", "source": "snli", "state": f"state {i}",
-                            "questions": {"q": {"type": "noul"}}}) for i in range(200)]
+                            "questions": {"q": {"type": "noul"}}}) for i in range(n_items)]
         with get_db() as conn:
             import_rows(conn, rows, "generated", "x", batch="prop")
+            configure(conn, "prop", overlap_target=overlap)
             set_status(conn, "prop", "open")
         from e13_labeler.app import app
 
@@ -438,7 +443,7 @@ class TestAssignment:
             counts = [r[0] for r in conn.execute(
                 """SELECT (SELECT COUNT(*) FROM annotations a WHERE a.item_id = i.item_id
                            AND a.skipped_code IS NULL) FROM items i""")]
-        assert counts == [2] * 200
+        assert counts == [overlap] * n_items
 
     def test_pairs_completed_first(self, db, fresh_client: TestClient):
         """FR-32 ordering: an item someone else labelled comes before a fresh one."""

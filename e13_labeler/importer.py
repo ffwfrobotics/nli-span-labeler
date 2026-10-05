@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from . import tiers
+from .batches import ensure_batch, resample
 from .db import audit
-from .reasons import DEFAULT_SPAN_POLICY, QUESTION_TYPES, REASONS
+from .reasons import QUESTION_TYPES, REASONS
 
 
 class RowError(ValueError):
@@ -210,17 +211,6 @@ def _dumps(value) -> Optional[str]:
     return None if value is None else json.dumps(value, ensure_ascii=False)
 
 
-def ensure_batch(conn: sqlite3.Connection, name: str) -> int:
-    row = conn.execute("SELECT id FROM batches WHERE name = ?", (name,)).fetchone()
-    if row:
-        return row["id"]
-    cur = conn.execute(
-        "INSERT INTO batches (name, reason_set_json, span_policy_json) VALUES (?, ?, ?)",
-        (name, json.dumps(list(REASONS)), json.dumps(DEFAULT_SPAN_POLICY)),
-    )
-    return cur.lastrowid
-
-
 def import_rows(
     conn: sqlite3.Connection,
     lines: Iterable[str],
@@ -309,6 +299,9 @@ def import_rows(
                 conn.execute("INSERT OR IGNORE INTO batch_items (batch_id, item_id) VALUES (?, ?)",
                              (batch_id, item.item_id))
 
+    if batch_id:
+        # New items join the batch's reliability subset by the same deterministic rule
+        resample(conn, conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone())
     conn.execute(
         "UPDATE import_runs SET n_rows = ?, n_items = ?, n_rejected = ? WHERE id = ?",
         (report.n_rows, report.n_items, report.n_rejected, run_id),

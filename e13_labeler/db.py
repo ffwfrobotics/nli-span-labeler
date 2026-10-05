@@ -230,7 +230,79 @@ UPDATE items SET visibility = CASE WHEN permissions IN ('libre', 'jev') THEN 'li
 CREATE INDEX idx_items_visibility ON items(visibility);
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4]
+# v5: overlap 1..n (owner, 2026-10-05: "3 is ideal, but we might have to make 1
+# work"). Default 3; a deterministic reliability subset can get more labels than
+# the rest; re-label batches let a labeler label their own items again after a
+# gap (intra-rater α when there is only one labeler). SQLite can't change a CHECK
+# or UNIQUE constraint in place, so batches and annotations are rebuilt.
+SCHEMA_V5 = """
+CREATE TABLE batches_v5 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    task_type TEXT NOT NULL DEFAULT 'reasons'
+        CHECK (task_type IN ('reasons', 'reasons+relation', 'relation')),
+    reason_set_json TEXT NOT NULL,
+    overlap_target INTEGER NOT NULL DEFAULT 3 CHECK (overlap_target >= 1),
+    reliability_fraction REAL NOT NULL DEFAULT 0
+        CHECK (reliability_fraction >= 0 AND reliability_fraction <= 1),
+    reliability_overlap INTEGER NOT NULL DEFAULT 3 CHECK (reliability_overlap >= 2),
+    relabel_of INTEGER REFERENCES batches(id),
+    relabel_after_days INTEGER NOT NULL DEFAULT 7 CHECK (relabel_after_days >= 0),
+    tier_ceiling TEXT NOT NULL DEFAULT 'jev+restricted',
+    span_policy_json TEXT NOT NULL DEFAULT '{}',
+    show_model_answer TEXT,
+    priority INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'open', 'closed')),
+    guideline_version TEXT,
+    require_note INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO batches_v5 (id, name, task_type, reason_set_json, overlap_target, tier_ceiling, span_policy_json,
+                        show_model_answer, priority, status, guideline_version, require_note, created_at)
+    SELECT id, name, task_type, reason_set_json, overlap_target, tier_ceiling, span_policy_json,
+           show_model_answer, priority, status, guideline_version, require_note, created_at FROM batches;
+DROP TABLE batches;
+ALTER TABLE batches_v5 RENAME TO batches;
+
+CREATE TABLE annotations_v5 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL REFERENCES items(item_id),
+    batch_id INTEGER REFERENCES batches(id),
+    labeler_id INTEGER NOT NULL REFERENCES labelers(id),
+    version INTEGER NOT NULL DEFAULT 1,
+    answerable INTEGER,
+    reasons_json TEXT,
+    note TEXT,
+    relation_json TEXT,
+    skipped_code TEXT CHECK (skipped_code IS NULL OR skipped_code IN
+        ('cannot_judge', 'broken_item', 'offensive', 'too_long', 'other')),
+    policy_override INTEGER NOT NULL DEFAULT 0,
+    is_gold_probe INTEGER NOT NULL DEFAULT 0,
+    active_ms INTEGER,
+    wall_ms INTEGER,
+    position_in_state_run INTEGER,
+    guideline_version TEXT,
+    app_version TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (item_id, labeler_id, batch_id, version)
+);
+INSERT INTO annotations_v5 SELECT id, item_id, batch_id, labeler_id, version, answerable, reasons_json, note,
+    relation_json, skipped_code, policy_override, is_gold_probe, active_ms, wall_ms, position_in_state_run,
+    guideline_version, app_version, created_at FROM annotations;
+DROP TABLE annotations;
+ALTER TABLE annotations_v5 RENAME TO annotations;
+CREATE INDEX idx_annotations_labeler ON annotations(labeler_id);
+CREATE INDEX idx_annotations_batch ON annotations(batch_id);
+CREATE INDEX idx_annotations_item_batch ON annotations(item_id, batch_id);
+CREATE INDEX idx_annotations_item_labeler ON annotations(item_id, labeler_id);
+
+-- Per-item overlap target; NULL means the batch's overlap_target (reliability subset sets it)
+ALTER TABLE batch_items ADD COLUMN target INTEGER;
+-- The batch an item was served from, so a submit lands in the right one
+ALTER TABLE locks ADD COLUMN batch_id INTEGER REFERENCES batches(id);
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5]
 
 
 def connect() -> sqlite3.Connection:
@@ -262,7 +334,16 @@ def init_db() -> int:
     with get_db() as conn:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         for number, script in enumerate(MIGRATIONS[version:], start=version + 1):
-            conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {number};\nCOMMIT;")
+            # Foreign keys off while tables are rebuilt (SQLite's documented
+            # procedure), then checked before the migration commits.
+            conn.executescript(f"PRAGMA foreign_keys = OFF;\nBEGIN;\n{script}\nPRAGMA user_version = {number};\n")
+            problems = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if problems:
+                conn.rollback()
+                conn.execute("PRAGMA foreign_keys = ON")
+                raise RuntimeError(f"migration {number} broke foreign keys: {[tuple(p) for p in problems[:5]]}")
+            conn.commit()
+            conn.execute("PRAGMA foreign_keys = ON")
         return len(MIGRATIONS)
 
 

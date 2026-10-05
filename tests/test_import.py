@@ -99,7 +99,7 @@ class TestImport:
         with get_db() as conn:
             batch = conn.execute("SELECT * FROM batches WHERE name = 'pilot'").fetchone()
             n = conn.execute("SELECT COUNT(*) FROM batch_items WHERE batch_id = ?", (batch["id"],)).fetchone()[0]
-        assert batch["status"] == "draft" and batch["overlap_target"] == 2
+        assert batch["status"] == "draft" and batch["overlap_target"] == 3  # owner: 3 is ideal
         assert n == imported.n_items
 
 

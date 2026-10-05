@@ -54,7 +54,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [ ] **FR-9** Import model pseudo-labelers (§5.4 JSONL, `labeler_kind: "model"`).
 - [~] **FR-37** Per-reason Krippendorff's α (nominal, binary), with n, pairable values, prevalence and a 95% bootstrap CI. Done in `agreement.py`; still needed: wiring to the DB (blind batches only, gold excluded).
 - [x] **FR-38** (first bullet) α for "any abstain" (`agreement.any_abstain_units`).
-- [x] **FR-40** One shared α module (`e13_labeler/agreement.py`, stdlib only), tested against the `krippendorff` package and Krippendorff's 2011 worked example.
+- [x] **FR-40** One shared α module, with `unit_key` for intra-rater units (`by_item_and_labeler`) so re-label α is never pooled with inter-rater α, (`e13_labeler/agreement.py`, stdlib only), tested against the `krippendorff` package and Krippendorff's 2011 worked example.
 - [ ] Simple dashboard table (§6.4 subset).
 - [ ] **FR-45** Annotation export (§5.4) and its JSON Schema.
 - [ ] **FR-46** Training export (§5.5).
@@ -64,7 +64,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [x] **FR-54** `SINGLE_USER=1`: owner auto-login, loopback only, including when forwarded headers are spoofed **[eval #5]**.
 
 ### Owner re-label
-- [ ] Owner-vs-owner α: re-label after a gap as a second labeler `L01-r2` (§10 M1).
+- [~] Owner-vs-owner α: re-label batches serve the owner's own items again, blind, after the gap. Done instead of a separate `L01-r2` account. Still needed: show intra-rater α on the dashboard as its own row.
 
 ## M2: multi-labeler
 
@@ -93,8 +93,8 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [ ] **FR-30** Rolling gold accuracy; auto-pause and a retraining quiz.
 
 ### Batches and queue (§4.5)
-- [~] **FR-31** Batches with `overlap_target ≥ 2`, `tier_ceiling`, span policy and status. Done: schema, import `--batch`, open/close (CLI + API). Still needed: create/edit batch settings.
-- [x] **FR-32** Overlap-aware `next`: complete pairs first, then priority, then random; the property test with 5 labelers × 200 items passes. The old routing was breadth-first, the opposite **[eval, §2]**.
+- [x] **FR-31** Batches: `overlap_target` 1..n (default 3, owner Q10), `tier_ceiling`, span policy, status, priority, note rule, a deterministic reliability subset (`reliability_fraction` × `reliability_overlap`) and re-label batches (`relabel_of`, `relabel_after_days`). Configurable via `python -m e13_labeler batch config|relabel` and `/api/admin/batches/{name}/config|relabel`. Opening a batch warns what its α will rest on.
+- [x] **FR-32** Overlap-aware `next`: complete pairs first, then priority, then random; per-item targets for the reliability subset; re-label batches as the one exception to "never twice". The property test (5 labelers) passes for overlap 1, 2 and 3. The old routing was breadth-first, the opposite **[eval, §2]**.
 - [ ] **FR-35** Progress and ETA.
 - [ ] **FR-21** Edit the last 20 submissions; versioned annotations.
 
@@ -142,6 +142,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [x] Q3: the ten §1.4 keys are final; `out_of_scope` is dropped (2026-10-05).
 - [x] Q7: `stale_state` is judged against `e13.asof`, defaulting to today, with no world knowledge. Every payload carries `asof` and the UI shows it.
 - [x] Q8: `false_premise` is judged against the state only (definition updated; the refuting span stays required).
-- [ ] Q2: the keep rule; Q9: the boundary order for ambiguous/underspecified/subjective; Q10: overlap of 2 or 3.
+- [x] Q10: 3 is ideal; 1 must work. Overlap 1..n (default 3), a reliability subset, and re-label batches (schema v5).
+- [ ] Q2: the keep rule; Q9: the boundary order for ambiguous/underspecified/subjective.
 - [x] Import sample: `feature/e13-test-fixtures`, merged with its JSONL (sha256 matches the README).
 - [x] Jev = an exact list, default `jev` (`openjev` is not Jev). Jev output marks the whole row's **release** tier; **visibility** follows the text's licence only (schema v4 `items.visibility`), except in batches that show Jev's answer.
