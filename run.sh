@@ -1,12 +1,5 @@
 #!/bin/bash
-# Start the NLI Span Labeler
+# Start the E13 labeler. Configure with env vars (see e13_labeler/config.py).
+# Binds to 127.0.0.1 by default; set HOST=0.0.0.0 behind an HTTPS proxy.
 cd "$(dirname "$0")"
-
-# Create data directory if it doesn't exist
-mkdir -p data/nli
-
-echo "Starting NLI Span Labeler on http://localhost:8000"
-echo "Press Ctrl+C to stop"
-echo
-
-uvicorn app:app --reload --port 8000 --host 0.0.0.0
+exec uv run python -m e13_labeler serve "$@"

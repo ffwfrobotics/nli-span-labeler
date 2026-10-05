@@ -1,246 +1,87 @@
 """
-Pytest configuration and fixtures for NLI Span Labeler tests.
+Pytest configuration and fixtures for the E13 labeler.
+
+Every test gets its own SQLite file (E13_DB) and runs without network access.
 """
+import json
 import os
-import sys
-import tempfile
-from pathlib import Path
 from typing import Generator
 
 import pytest
 from fastapi.testclient import TestClient
 
-# Add app directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-# Set test environment before importing app
-os.environ["ANONYMOUS_MODE"] = "0"
-os.environ["ADMIN_USER"] = "test_admin"
+# Set test environment before importing the app
 os.environ["RATE_LIMIT_ENABLED"] = "0"  # Disable rate limiting in tests
+os.environ.pop("SINGLE_USER", None)
+
+OWNER_PASSWORD = "owner-pass-123"
+LABELER_PASSWORD = "labeler-pass-123"
 
 
 @pytest.fixture
-def fresh_client() -> Generator[TestClient, None, None]:
-    """Create a fresh test client with clean database for each test."""
-    import app as app_module
+def db(tmp_path, monkeypatch):
+    """A fresh, migrated database for this test."""
+    monkeypatch.setenv("E13_DB", str(tmp_path / "e13.db"))
+    from e13_labeler.db import init_db
 
-    # Create new temp db for this test
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        test_db = Path(f.name)
+    init_db()
+    return tmp_path / "e13.db"
 
-    # Save original DB_PATH
-    original_db_path = app_module.DB_PATH
 
-    app_module.DB_PATH = test_db
-    app_module.init_db()
+@pytest.fixture
+def owner(db) -> dict:
+    from e13_labeler.auth import create_labeler
+    from e13_labeler.db import get_db
 
-    with TestClient(app_module.app) as c:
+    with get_db() as conn:
+        return create_labeler(conn, "owner", OWNER_PASSWORD, role="owner", clearance="internal", status="active")
+
+
+@pytest.fixture
+def fresh_client(db) -> Generator[TestClient, None, None]:
+    """An unauthenticated client on a clean database."""
+    from e13_labeler.app import app
+
+    with TestClient(app) as c:
         yield c
 
-    # Restore original path
-    app_module.DB_PATH = original_db_path
 
-    if test_db.exists():
-        test_db.unlink()
+def make_labeler(login: str, clearance: str = "public", role: str = "labeler") -> dict:
+    from e13_labeler.auth import create_labeler
+    from e13_labeler.db import get_db
+
+    with get_db() as conn:
+        return create_labeler(conn, login, LABELER_PASSWORD, role=role, clearance=clearance, status="active")
 
 
-@pytest.fixture
-def auth_client() -> Generator[tuple[TestClient, dict], None, None]:
-    """Create authenticated test client with a registered user (empty examples table)."""
-    import app as app_module
-
-    # Create new temp db for this test
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        test_db = Path(f.name)
-
-    # Save original DB_PATH
-    original_db_path = app_module.DB_PATH
-
-    app_module.DB_PATH = test_db
-    app_module.init_db()
-
-    with TestClient(app_module.app) as client:
-        # Clear examples loaded by startup event (for tests that need empty DB)
-        with app_module.get_db() as conn:
-            conn.execute("DELETE FROM examples")
-            conn.commit()
-
-        # Register a test user
-        response = client.post("/api/auth/register", json={
-            "username": f"testuser_{os.urandom(4).hex()}",
-            "password": "testpass123",
-            "display_name": "Test User"
-        })
-        assert response.status_code == 200
-        user_data = response.json()
-
-        # Client now has session cookie from registration
-        yield client, user_data
-
-    # Restore original path
-    app_module.DB_PATH = original_db_path
-
-    if test_db.exists():
-        test_db.unlink()
+def login(client: TestClient, login_name: str, password: str = LABELER_PASSWORD):
+    response = client.post("/api/auth/login", json={"login_name": login_name, "password": password})
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 @pytest.fixture
-def admin_client() -> Generator[tuple[TestClient, dict], None, None]:
-    """Create authenticated test client with admin user."""
-    import app as app_module
-
-    # Create new temp db for this test
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        test_db = Path(f.name)
-
-    # Save original DB_PATH
-    original_db_path = app_module.DB_PATH
-
-    app_module.DB_PATH = test_db
-    app_module.init_db()
-
-    with TestClient(app_module.app) as client:
-        # Register as the admin user (ADMIN_USER env var)
-        response = client.post("/api/auth/register", json={
-            "username": "test_admin",
-            "password": "adminpass123",
-            "display_name": "Test Admin"
-        })
-
-        if response.status_code == 400:
-            # Already registered, login instead
-            response = client.post("/api/auth/login", json={
-                "username": "test_admin",
-                "password": "adminpass123"
-            })
-
-        assert response.status_code == 200
-        user_data = response.json()
-
-        yield client, user_data
-
-    # Restore original path
-    app_module.DB_PATH = original_db_path
-
-    if test_db.exists():
-        test_db.unlink()
+def owner_client(owner, fresh_client) -> TestClient:
+    login(fresh_client, "owner", OWNER_PASSWORD)
+    return fresh_client
 
 
 @pytest.fixture
-def auth_client_with_example() -> Generator[tuple[TestClient, dict, dict], None, None]:
-    """Create authenticated test client with a sample example in the database.
-
-    Returns: (client, user_data, example_data)
-    """
-    import app as app_module
-
-    # Create new temp db for this test
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        test_db = Path(f.name)
-
-    # Save original DB_PATH
-    original_db_path = app_module.DB_PATH
-
-    app_module.DB_PATH = test_db
-    app_module.init_db()
-
-    with TestClient(app_module.app) as client:
-        # Clear examples loaded by startup event (we want only our test example)
-        with app_module.get_db() as conn:
-            conn.execute("DELETE FROM examples")
-            conn.commit()
-
-        # Register a test user
-        response = client.post("/api/auth/register", json={
-            "username": f"testuser_{os.urandom(4).hex()}",
-            "password": "testpass123",
-            "display_name": "Test User"
-        })
-        assert response.status_code == 200
-        user_data = response.json()
-
-        # Insert sample example
-        example_id = f"test_example_{os.urandom(4).hex()}"
-        with app_module.get_db() as conn:
-            conn.execute("""
-                INSERT INTO examples (id, dataset, premise, hypothesis, gold_label, gold_label_text)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (example_id, "test_dataset", "The cat sat on the mat.", "The cat is sitting.", 0, "entailment"))
-            conn.commit()
-
-        example_data = {
-            "id": example_id,
-            "dataset": "test_dataset",
-            "premise": "The cat sat on the mat.",
-            "hypothesis": "The cat is sitting.",
-            "gold_label": 0,
-            "gold_label_text": "entailment"
-        }
-
-        yield client, user_data, example_data
-
-    # Restore original path
-    app_module.DB_PATH = original_db_path
-
-    if test_db.exists():
-        test_db.unlink()
+def public_client(db, fresh_client) -> TestClient:
+    make_labeler("pub", clearance="public")
+    login(fresh_client, "pub")
+    return fresh_client
 
 
-@pytest.fixture
-def admin_client_with_example() -> Generator[tuple[TestClient, dict, dict], None, None]:
-    """Create admin test client with a sample example in the database.
+def insert_item(item_id: str, permissions: str = "libre", state: str = "some state") -> None:
+    """Minimal item row for endpoint tests (the importer has its own tests)."""
+    from e13_labeler.db import get_db
 
-    Returns: (client, admin_data, example_data)
-    """
-    import app as app_module
-
-    # Create new temp db for this test
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        test_db = Path(f.name)
-
-    # Save original DB_PATH
-    original_db_path = app_module.DB_PATH
-
-    app_module.DB_PATH = test_db
-    app_module.init_db()
-
-    with TestClient(app_module.app) as client:
-        # Clear examples loaded by startup event (we want only our test example)
-        with app_module.get_db() as conn:
-            conn.execute("DELETE FROM examples")
-            conn.commit()
-
-        # Register as admin
-        response = client.post("/api/auth/register", json={
-            "username": "test_admin",
-            "password": "adminpass123",
-            "display_name": "Test Admin"
-        })
-        assert response.status_code == 200
-        admin_data = response.json()
-
-        # Insert sample example
-        example_id = f"test_example_{os.urandom(4).hex()}"
-        with app_module.get_db() as conn:
-            conn.execute("""
-                INSERT INTO examples (id, dataset, premise, hypothesis, gold_label, gold_label_text)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (example_id, "test_dataset", "The cat sat on the mat.", "The cat is sitting.", 0, "entailment"))
-            conn.commit()
-
-        example_data = {
-            "id": example_id,
-            "dataset": "test_dataset",
-            "premise": "The cat sat on the mat.",
-            "hypothesis": "The cat is sitting.",
-            "gold_label": 0,
-            "gold_label_text": "entailment"
-        }
-
-        yield client, admin_data, example_data
-
-    # Restore original path
-    app_module.DB_PATH = original_db_path
-
-    if test_db.exists():
-        test_db.unlink()
+    row_id, qid = item_id.split("#")
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO items (item_id, row_id, qid, source, state, state_format, state_sha256,
+                                  question_json, permissions)
+               VALUES (?, ?, ?, 'test', ?, 'text', 'sha256:x', ?, ?)""",
+            (item_id, row_id, qid, state, json.dumps({"type": "noul"}), permissions),
+        )

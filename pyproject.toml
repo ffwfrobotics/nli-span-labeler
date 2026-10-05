@@ -1,0 +1,35 @@
+[project]
+name = "e13-labeler"
+dynamic = ["version"]
+description = "Blind abstain-reason labelling with evidence spans and per-reason Krippendorff's alpha (E13)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.142",
+    "uvicorn[standard]>=0.54",
+    "pydantic>=2.13",
+    "slowapi>=0.1.9",
+    "argon2-cffi>=25.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1",
+    "httpx2>=2.13",       # starlette TestClient transport
+    "krippendorff>=0.8",   # reference implementation for the alpha tests (FR-40)
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "e13_labeler/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["e13_labeler"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --tb=short"

@@ -1,33 +1,23 @@
-# Database
+# Runtime data: database, backups, exports (requirements FR-49, NFR-6)
+outputs/
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-env/
 .venv/
-ENV/
+venv/
+.pytest_cache/
 
 # IDE
 .idea/
 .vscode/
 *.swp
-*.swo
 *~
 
 # OS
 .DS_Store
 Thumbs.db
-
-# Data (users download their own)
-data/nli/*.jsonl
-
-# Exports
-*.jsonl
-!scripts/*.jsonl
-nli_session_state.json

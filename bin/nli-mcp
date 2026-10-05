@@ -1,4 +1,0 @@
-#!/bin/bash
-# NLI Span Labeler MCP Server wrapper
-cd /opt/goblincorps/repos/nli-span-labeler
-exec python -m mcp_server "$@"
