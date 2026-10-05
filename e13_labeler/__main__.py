@@ -164,16 +164,34 @@ def print_agreement(rep: dict) -> None:
     for pair, d in rep["model_vs_model"].items():
         table(f"{pair.replace('|', ' vs ')} ({d['n_pairs']} items)", d)
 
+    spans = rep["spans"]
+    print(f"\nSpans (word units): any role F1 {_fmt(spans['any_role']['f1'])} over {spans['any_role']['n_pairs']} "
+          f"pairs; AP (3+ labelers) {_fmt(spans['ap']['any_role']['ap'])} over {spans['ap']['any_role']['n']}")
+    for role, d in spans["per_role"].items():
+        if d["n_pairs"]:
+            print(f"  {role:12} F1 {_fmt(d['f1'])}  Jaccard {_fmt(d['jaccard'])}  ({d['n_pairs']} pairs)")
+    top = rep["confusion"]["top"][:8]
+    if top:
+        print("\nConfusion (pairs disagreeing): " + "   ".join(f"{t['a']}<->{t['b']} {t['count']}" for t in top))
+    labs = rep["labelers"]
+    for lab, d in labs["pairwise"]["per_labeler"].items():
+        gold = labs["gold"].get(lab)
+        print(f"  {lab}: exact agreement {_fmt(d['exact'])} over {d['n_items']} shared items"
+              + (f"; gold {_fmt(gold['accuracy'])} ({gold['n_probes']} probes)" if gold else ""))
+    for f in labs["monitoring"]:
+        print(f"  ! {f['labeler']}: " + (f"median active time {f['median_active_ms'] / 1000:.1f} s"
+              if f["kind"] == "fast" else f"{f['reason']} at {f['rate']:.0%} vs batch {f['batch_rate']:.0%}"))
+
 
 def cmd_agreement(args) -> int:
     """FR-37/38: the agreement report in the terminal."""
-    from .analysis import agreement_record, report
-    from .records import load_annotations
+    from .analysis import report
+    from .records import agreement_inputs
 
     init_db()
     with get_db() as conn:
-        records = [agreement_record(r) for r in load_annotations(conn, _filters(args))]
-    rep = report(records, n_boot=args.n_boot, seed=args.seed)
+        data = agreement_inputs(conn, _filters(args))
+    rep = report(data, n_boot=args.n_boot, seed=args.seed)
     if args.json:
         print(json.dumps(rep, indent=1))
     else:

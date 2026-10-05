@@ -227,11 +227,13 @@ def item_rows(conn: sqlite3.Connection, filters: Filters) -> list[dict]:
 # ============================================================================
 
 def agreement_document(conn: sqlite3.Connection, filters: Filters, n_boot: int = 1000, seed: int = 0) -> dict:
-    records = [agreement_record(r) for r in load_annotations(conn, filters)]
-    doc = report(records, n_boot=n_boot, seed=seed)
+    from .records import agreement_inputs
+
+    data = agreement_inputs(conn, filters)
+    doc = report(data, n_boot=n_boot, seed=seed)
     doc["filters"] = filters.as_dict()
     # The exact inputs, so `analysis.report(doc["data"], n_boot=..., seed=...)` reproduces every number
-    doc["data"] = records
+    doc["data"] = data
     return doc
 
 

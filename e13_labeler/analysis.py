@@ -21,12 +21,13 @@ import statistics
 from itertools import combinations
 from typing import Iterable, Mapping, Sequence
 
+from . import spans_agreement
 from .agreement import by_item, by_item_and_labeler, describe, reason_alphas
 from .reasons import CANDIDATES, ESTABLISHED, REASONS
 
 AGREEMENT_SCHEMA = "e13.agreement/1"
 RECORD_KEYS = ("item_id", "labeler", "labeler_kind", "batch", "relabel_of", "blind", "gold_probe",
-               "skipped", "answerable", "reasons")
+               "skipped", "answerable", "reasons", "active_ms", "span_units")
 
 
 def agreement_record(record: Mapping) -> dict:
@@ -36,6 +37,7 @@ def agreement_record(record: Mapping) -> dict:
         "batch": record["batch"], "relabel_of": record["_relabel_of"], "blind": record["_blind"],
         "gold_probe": record["_gold_probe"], "skipped": record["skipped"],
         "answerable": record["answerable"], "reasons": record["reasons"],
+        "active_ms": record["timing"]["active_ms"],
     }
 
 
@@ -81,8 +83,16 @@ def _by_unit(r: Mapping):
     return r["_unit"]
 
 
-def report(records: Iterable[Mapping], reasons: Sequence[str] = REASONS, n_boot: int = 1000, seed: int = 0) -> dict:
-    """Every agreement number the dashboard and the agreement export show."""
+def report(data, reasons: Sequence[str] = REASONS, n_boot: int = 1000, seed: int = 0) -> dict:
+    """
+    Every agreement number the dashboard and the agreement export show.
+    ``data`` is records.agreement_inputs() (the export's "data"), or just a list
+    of agreement records (then no gold accuracy or span AP).
+    """
+    if isinstance(data, Mapping):
+        records, probes, universe = data["records"], data.get("gold_probes", []), data.get("token_universe", {})
+    else:
+        records, probes, universe = data, [], {}
     records = [dict(r) for r in records]
     usable = [r for r in records if _usable(r)]
     humans = [r for r in usable if r["labeler_kind"] == "human"]
@@ -141,6 +151,17 @@ def report(records: Iterable[Mapping], reasons: Sequence[str] = REASONS, n_boot:
             mvm[f"{a}|{b}"] = {"per_reason": {r: res[r] for r in reasons}, "any_abstain": res["any_abstain"],
                                "n_pairs": len(recs) // 2}
     result["model_vs_model"] = mvm
+
+    # FR-39 spans, FR-41 confusion / labelers, §7.3 monitoring: over the inter-rater set
+    pairable = set(pairable_items)
+    paired = [r for r in first_pass if r["item_id"] in pairable]
+    result["spans"] = spans_agreement.span_agreement(paired, universe)
+    result["confusion"] = spans_agreement.confusion(paired)
+    result["labelers"] = {
+        "pairwise": spans_agreement.pairwise(paired),
+        "gold": spans_agreement.gold_accuracy(probes),
+        "monitoring": spans_agreement.monitoring(first_pass),
+    }
     result["params"] = {"n_boot": n_boot, "seed": seed, "reasons": list(reasons)}
     return result
 

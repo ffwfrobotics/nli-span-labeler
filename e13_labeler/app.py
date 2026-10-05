@@ -1118,12 +1118,20 @@ def _admin_filters(admin: dict, batch: Optional[list] = None, **kwargs):
 async def agreement_report(batch: Optional[list[str]] = Query(None), n_boot: int = Query(1000, ge=0, le=5000),
                            admin: dict = Depends(require_admin)):
     """Per-reason α with CI, prevalence and n; candidates vs established; intra-rater; human/model (FR-37/38/41)."""
-    from .analysis import agreement_record, report
-    from .records import load_annotations
+    from .analysis import report
+    from .quality import gold_accuracy
+    from .records import agreement_inputs
 
     with get_db() as conn:
-        records = [agreement_record(r) for r in load_annotations(conn, _admin_filters(admin, batch))]
-    return report(records, n_boot=n_boot)
+        data = agreement_inputs(conn, _admin_filters(admin, batch))
+        # Live account state for the labeler panel: rolling gold accuracy and pauses (FR-30)
+        status = {r["pseudonym"]: {"status": r["status"], "pause_reason": r["pause_reason"],
+                                   **{k: v for k, v in gold_accuracy(conn, r["id"]).items()
+                                      if k in ("rolling", "rolling_n", "below_threshold")}}
+                  for r in conn.execute("SELECT * FROM labelers WHERE kind = 'human'")}
+    out = report(data, n_boot=n_boot)
+    out["labelers"]["status"] = status
+    return out
 
 
 class GoldIn(BaseModel):

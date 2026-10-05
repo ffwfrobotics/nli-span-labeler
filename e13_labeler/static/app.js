@@ -388,7 +388,54 @@ function renderAgreement(rep) {
         html += `<details style="margin-top: 10px;"><summary>${escapeHtml(pair.replace('|', ' vs '))}
                  (${d.n_pairs} items)</summary>${agreementTable(d)}</details>`;
     }
+    html += confusionPanel(rep.confusion) + labelersPanel(rep.labelers) + spansPanel(rep.spans);
     document.getElementById('agreement-view').innerHTML = html;
+}
+
+// FR-41: which reasons labelers swap for each other (dilution)
+function confusionPanel(c) {
+    const top = c.top.slice(0, 10).map(t => `${escapeHtml(t.a)} ↔ ${escapeHtml(t.b)} <strong>${t.count}</strong>`);
+    return `<h4 class="pane-title" style="margin-top: 14px;">Confusion (pairs disagreeing)</h4>
+        <div class="dash-line">${top.join(' · ') || 'No disagreements yet'}</div>`;
+}
+
+// FR-41 / FR-30 / §7.3: per-labeler gold accuracy, pairwise agreement, monitoring flags
+function labelersPanel(l) {
+    const names = [...new Set([...Object.keys(l.pairwise.per_labeler), ...Object.keys(l.gold),
+                               ...Object.keys(l.status || {})])].sort();
+    const flags = {};
+    l.monitoring.forEach(f => (flags[f.labeler] = flags[f.labeler] || []).push(
+        f.kind === 'fast' ? `median ${(f.median_active_ms / 1000).toFixed(1)} s`
+                          : `${f.reason} ${Math.round(f.rate * 100)}% vs ${Math.round(f.batch_rate * 100)}%`));
+    const rows = names.map(n => {
+        const p = l.pairwise.per_labeler[n] || {};
+        const g = l.gold[n];
+        const st = (l.status || {})[n] || {};
+        if (!p.n_items && !g && st.status !== 'paused') return '';
+        return `<tr><td>${escapeHtml(n)}</td><td>${p.n_items ?? 0}</td><td>${fmt(p.exact)}</td>
+            <td>${g ? `${fmt(g.accuracy)} (${g.n_probes})` : '–'}</td>
+            <td>${st.rolling == null ? '–' : fmt(st.rolling)}${st.below_threshold ? ' <span class="tag cand">LOW</span>' : ''}</td>
+            <td>${escapeHtml(st.status || '')}${st.pause_reason ? ` (${escapeHtml(st.pause_reason)})` : ''}</td>
+            <td>${(flags[n] || []).map(f => `<span class="tag cand">! ${escapeHtml(f)}</span>`).join(' ')}</td></tr>`;
+    }).join('');
+    const pairs = l.pairwise.pairs.map(p => `${escapeHtml(p.a)}–${escapeHtml(p.b)} ${fmt(p.exact)} (${p.n_items})`);
+    return `<h4 class="pane-title" style="margin-top: 14px;">Labelers</h4>
+        <table class="admin-table"><thead><tr><th>labeler</th><th>pair comparisons</th><th>exact agreement</th>
+        <th>gold (probes)</th><th>rolling gold</th><th>status</th><th>flags (§7.3)</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7">No paired labels yet</td></tr>'}</tbody></table>
+        ${pairs.length ? `<div class="dash-line">Pairs: ${pairs.join(' · ')}</div>` : ''}`;
+}
+
+// FR-39: span agreement in word units
+function spansPanel(s) {
+    const row = (name, d) => d.n_pairs ? `<tr><td>${escapeHtml(name)}</td><td>${d.n_pairs}</td><td>${fmt(d.f1)}</td>
+        <td>${fmt(d.jaccard)}</td><td>${fmt(d.f1_pooled)}</td></tr>` : '';
+    const rows = row('any role', s.any_role) + Object.entries(s.per_role).map(([r, d]) => row(r, d)).join('') +
+        Object.entries(s.per_reason).map(([r, d]) => row(`reason: ${r}`, d)).join('');
+    const ap = s.ap.any_role.n ? ` · AP (3+ labelers): ${fmt(s.ap.any_role.ap)} over ${s.ap.any_role.n}` : '';
+    return `<details style="margin-top: 10px;"><summary>Span agreement (word units)${ap}</summary>
+        <table class="admin-table"><thead><tr><th></th><th>pairs</th><th>F1</th><th>Jaccard</th><th>F1 pooled</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5">No spans on paired items yet</td></tr>'}</tbody></table></details>`;
 }
 
 async function runExport() {

@@ -1102,3 +1102,5 @@ pre.json-block { white-space: pre-wrap; font-size: 0.8rem; color: var(--text-sec
                margin: 4px 0; color: var(--text-primary); cursor: pointer; font: inherit; }
 .history-row:hover:not([disabled]), .history-row:focus { border-color: var(--accent); outline: none; }
 .history-row[disabled] { opacity: 0.5; cursor: default; }
+
+.dash-line { font-size: 0.85rem; margin: 4px 0; line-height: 1.6; }

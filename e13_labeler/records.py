@@ -151,3 +151,68 @@ def _record(r: sqlite3.Row, spans: list) -> dict:
 def public(record: dict) -> dict:
     """The record as exported: internal keys dropped."""
     return {k: v for k, v in record.items() if not k.startswith("_")}
+
+
+def load_probes(conn: sqlite3.Connection, filters: Filters = Filters()) -> list[dict]:
+    """
+    Hidden gold answers (FR-28) for per-labeler gold accuracy (FR-41): the latest
+    version of each human probe annotation, with the gold it is scored against.
+    Same clearance and batch filters as the annotations.
+    """
+    from .gold import get_gold
+
+    filters.validate()
+    allowed = visible_to(filters.clearance)
+    sql = f"""
+        SELECT a.item_id, a.answerable, a.reasons_json, l.pseudonym, b.name AS batch_name
+        FROM annotations a JOIN items i ON i.item_id = a.item_id JOIN labelers l ON l.id = a.labeler_id
+        LEFT JOIN batches b ON b.id = a.batch_id
+        WHERE a.is_gold_probe = 1 AND a.skipped_code IS NULL AND l.kind = 'human'
+          AND i.visibility IN ({','.join('?' * len(allowed))})
+          AND a.version = (SELECT MAX(v.version) FROM annotations v WHERE v.item_id = a.item_id
+                           AND v.labeler_id = a.labeler_id AND v.batch_id IS a.batch_id)"""
+    params = list(allowed)
+    if filters.batches:
+        sql += f" AND b.name IN ({','.join('?' * len(filters.batches))})"
+        params += list(filters.batches)
+    out = []
+    for r in conn.execute(sql + " ORDER BY a.item_id, l.pseudonym", params).fetchall():
+        gold = get_gold(conn, r["item_id"])
+        if gold is None:
+            continue
+        answer = ["answerable"] if r["answerable"] else sorted(k for k, v in json.loads(r["reasons_json"]).items() if v)
+        out.append({"labeler": r["pseudonym"], "item_id": r["item_id"], "batch": r["batch_name"], "answer": answer,
+                    "gold": {k: gold[k] for k in ("answerable", "reasons", "alternatives")}})
+    return out
+
+
+def agreement_inputs(conn: sqlite3.Connection, filters: Filters = Filters()) -> dict:
+    """
+    Everything analysis.report needs, from the database (FR-48 "data"): the
+    agreement records with each annotation's span word units, the gold probes,
+    and the state word universe of items with three or more labelers (for AP).
+    """
+    from collections import defaultdict
+
+    from .analysis import agreement_record
+    from .spans_agreement import span_units, state_universe
+
+    loaded = load_annotations(conn, filters)
+    items: dict = {}
+    records = []
+    labelers = defaultdict(set)
+    for r in loaded:
+        rec = agreement_record(r)
+        if r["item_id"] not in items:
+            items[r["item_id"]] = conn.execute("SELECT state, state_format, question_json FROM items WHERE item_id = ?",
+                                               (r["item_id"],)).fetchone()
+        it = items[r["item_id"]]
+        question = json.loads(it["question_json"])
+        rec["span_units"] = [{"role": s["role"], "reasons": s["reasons"],
+                              "units": span_units(s, it["state"], it["state_format"], question)} for s in r["spans"]]
+        records.append(rec)
+        if r["labeler_kind"] == "human":
+            labelers[r["item_id"]].add(r["labeler"])
+    universe = {i: state_universe(items[i]["state"], items[i]["state_format"])
+                for i, ls in sorted(labelers.items()) if len(ls) >= 3}
+    return {"records": records, "gold_probes": load_probes(conn, filters), "token_universe": universe}
