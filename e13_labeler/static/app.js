@@ -231,12 +231,83 @@ function updateAdminTabVisibility() {
 // Admin
 // ============================================================================
 
+// Agreement dashboard (requirements §6.4, FR-37/38/41/42)
+function fmt(x, digits = 2) {
+    return x == null ? '–' : Number(x).toFixed(digits);
+}
+
+function agreementTable(section, highlightCandidates, candidates) {
+    const rows = Object.entries(section.per_reason).map(([reason, d]) => [reason, d]);
+    rows.push(['any abstain', section.any_abstain]);
+    const body = rows.map(([reason, d]) => {
+        const cand = highlightCandidates && candidates && candidates[reason];
+        const notes = [];
+        if (cand && cand.below_min) notes.push('<span class="tag cand">BELOW min established</span>');
+        else if (cand && cand.alpha != null && cand.min != null) notes.push('within range');
+        if (d.unstable && d.n_items) notes.push('<span class="tag cand">! α unstable</span>');
+        return `<tr class="${cand ? 'candidate-row' : ''}">
+            <td>${escapeHtml(reason)}${cand ? ' <span class="tag cand">CAND</span>' : ''}</td>
+            <td>${d.n_items}</td><td><strong>${fmt(d.alpha)}</strong></td>
+            <td>${d.ci95 ? `${fmt(d.ci95[0])}–${fmt(d.ci95[1])}` : '–'}</td>
+            <td>${d.prevalence == null ? '–' : Math.round(d.prevalence * 100) + '%'}</td>
+            <td>${d.n_positive}</td><td>${notes.join(' ')}</td></tr>`;
+    }).join('');
+    return `<table class="admin-table"><thead><tr><th>reason</th><th>n</th><th>α</th><th>CI95</th><th>prev</th>
+        <th>pos</th><th>notes</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function renderAgreement(rep) {
+    const inter = rep.inter_rater;
+    const cands = inter.candidates || {};
+    const ref = Object.values(cands)[0];
+    document.getElementById('agreement-meta').textContent =
+        `${inter.n_items_pairable} items with 2+ human labels · labelers ${inter.labelers.join(', ') || '–'}` +
+        (ref ? ` · established α min ${fmt(ref.min)} / median ${fmt(ref.median)}` : '');
+    let html = `<h4 class="pane-title">Inter-rater (blind batches, gold excluded)</h4>` +
+        agreementTable(inter, true, cands);
+    if (rep.intra_rater.n_pairs) {
+        html += `<h4 class="pane-title" style="margin-top: 14px;">Intra-rater: re-label vs first pass
+                 (${rep.intra_rater.n_pairs} pairs; consistency, not agreement)</h4>` + agreementTable(rep.intra_rater);
+    }
+    for (const [model, d] of Object.entries(rep.human_vs_model)) {
+        html += `<details style="margin-top: 10px;"><summary>Human vs ${escapeHtml(model)} (${d.n_pairs} pairs)</summary>
+                 ${agreementTable(d)}</details>`;
+    }
+    for (const [pair, d] of Object.entries(rep.model_vs_model)) {
+        html += `<details style="margin-top: 10px;"><summary>${escapeHtml(pair.replace('|', ' vs '))}
+                 (${d.n_pairs} items)</summary>${agreementTable(d)}</details>`;
+    }
+    document.getElementById('agreement-view').innerHTML = html;
+}
+
+async function runExport() {
+    const el = document.getElementById('export-result');
+    el.textContent = 'Exporting…';
+    const resp = await authenticatedFetch('/api/admin/export', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+    });
+    const data = await resp.json();
+    el.textContent = resp.ok
+        ? `Written to ${data.directory}: ` + data.files.map(f => `${f.name} (${f.rows})`).join(', ')
+        : `Export failed: ${JSON.stringify(data.detail)}`;
+}
+
 async function loadAdmin() {
+    authenticatedFetch('/api/admin/agreement?n_boot=1000').then(r => r.json()).then(renderAgreement)
+        .catch(e => showMessage(e.message, 'error'));
     try {
-        const [labelers, flags] = await Promise.all([
+        const [labelers, flags, batches] = await Promise.all([
             authenticatedFetch('/api/admin/labelers').then(r => r.json()),
             authenticatedFetch('/api/admin/flags').then(r => r.json()),
+            authenticatedFetch('/api/admin/batches').then(r => r.json()),
         ]);
+        document.querySelector('#batches-table tbody').innerHTML = batches.batches.map(b => `
+            <tr><td>${escapeHtml(b.name)}</td><td>${escapeHtml(b.status)}</td><td>${b.n_items}</td>
+                <td>${b.relabel_of ? '–' : b.overlap_target}</td>
+                <td>${b.reliability_subset ? `${b.reliability_subset} items × ${b.reliability_overlap}` : '–'}</td>
+                <td>${b.relabel_of ? `${escapeHtml(b.relabel_of)} (after ${b.relabel_after_days}d)` : '–'}</td>
+                <td>${escapeHtml(b.tier_ceiling)}</td></tr>`).join('')
+            || '<tr><td colspan="7">No batches yet: python -m e13_labeler import FILE --batch NAME</td></tr>';
         document.querySelector('#labelers-table tbody').innerHTML = labelers.labelers.map(l => `
             <tr><td>${escapeHtml(l.pseudonym)}</td><td>${escapeHtml(l.login_name || '')}</td>
                 <td>${escapeHtml(l.kind)}</td><td>${escapeHtml(l.role)}</td><td>${escapeHtml(l.clearance)}</td>

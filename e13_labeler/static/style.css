@@ -1069,3 +1069,8 @@ pre.json-block { white-space: pre-wrap; font-size: 0.8rem; color: var(--text-sec
     .label-grid { grid-template-columns: 1fr; height: auto; }
     .state-pane { height: auto; max-height: 60vh; }
 }
+
+/* Agreement dashboard (§6.4) */
+.candidate-row td { background: rgba(251, 191, 36, 0.06); }
+#agreement-view .admin-table td, #agreement-view .admin-table th { padding: 4px 8px; font-size: 0.85rem; }
+#agreement-view details summary { cursor: pointer; color: var(--text-secondary); font-size: 0.85rem; }
