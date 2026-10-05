@@ -206,7 +206,14 @@ CREATE TABLE audit_log (
 );
 """
 
-MIGRATIONS = [SCHEMA_V1]
+# v2: batch option to require a note for some reasons (FR-14); when a lock was
+# handed out, for server-side wall time (FR-22).
+SCHEMA_V2 = """
+ALTER TABLE batches ADD COLUMN require_note INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE locks ADD COLUMN served_at TEXT;
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2]
 
 
 def connect() -> sqlite3.Connection:

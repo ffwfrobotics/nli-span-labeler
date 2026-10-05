@@ -37,16 +37,16 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [x] **FR-56** Max-tier rule. A replacement that lowers a tier needs `--allow-lower-tier`, which is audit-logged.
 
 ### Labelling (§4.2, §6.1, §6.2)
-- [ ] **FR-12** Blind `GET /api/next` payload (§5.3): no `gold`, `source`, `e13`, `model_answers` or `is_gold_probe`, and no gold-based filters **[eval #1]**.
-- [ ] **FR-13** Ten independent reason toggles; `answerable` is exclusive; reject empty submissions.
-- [ ] **FR-14** Note (≤ 2,000 chars), required per batch config.
-- [ ] **FR-15** Span roles support/refute/unsupported/framing, with side validation.
-- [ ] **FR-16** Spans link to an option and to checked reasons.
-- [ ] **FR-17** Coordinates: char offsets, RFC 6901 pointer + offsets, option-side offsets; `text == slice`.
+- [x] **FR-12** Blind `GET /api/next` payload (§5.3): no `gold`, `source`, `e13`, `model_answers` or `is_gold_probe`, and no gold-based filters **[eval #1]**.
+- [~] **FR-13** Ten independent reason toggles; `answerable` is exclusive; reject empty submissions. The API is done; the UI toggles are still needed.
+- [~] **FR-14** Note (≤ 2,000 chars), required per batch config (`batches.require_note`). The API is done; the UI is still needed.
+- [~] **FR-15** Span roles support/refute/unsupported/framing, with side validation. The API is done; the UI is still needed.
+- [~] **FR-16** Spans link to an option and to checked reasons. The API is done; the UI is still needed.
+- [~] **FR-17** Coordinates: char offsets, RFC 6901 pointer + offsets, option-side offsets; `text == slice`. Server-side validation is done; the UI is still needed.
 - [ ] **FR-18** Word-snapped selection, Alt for character precision. A new selection model: the old UI was click-per-token with no drag-select.
-- [ ] **FR-19** Span policy per reason; block submit; `Shift+Enter` override recorded.
-- [ ] **FR-20** Skip with a reason code; never re-served to that labeler.
-- [ ] **FR-22** Active time (visible tab + interaction in the last 60 s) and wall time.
+- [~] **FR-19** Span policy per reason; block submit; override recorded. The API is done (422 with `policy: true`); the `Shift+Enter` UI is still needed.
+- [~] **FR-20** Skip with a reason code; never re-served to that labeler. The API is done; the `x` + code UI is still needed.
+- [~] **FR-22** Active time (visible tab + interaction in the last 60 s) and wall time. Wall time is measured server-side from lock hand-out; the client-side active-time meter is still needed.
 - [ ] §6.1 labelling screen and §6.2 keyboard map. The help overlay is already generated from the map in `app.js`.
 - [ ] Span rendering: colour **and** underline style per role (§6.1, NFR-9).
 
@@ -69,7 +69,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 ## M2: multi-labeler
 
 ### Access control (§4.8, §8)
-- [~] **FR-50 / FR-57** Server-side clearance filter. Done for lock and flag endpoints (`fetch_visible_item`); still needed for `next`, item fetch, history, quiz, adjudication and export, plus a fuzz test over every item endpoint.
+- [~] **FR-50 / FR-57** Server-side clearance filter. Done for `next` (with the batch `tier_ceiling`), submit, skip, locks and flags. Still needed: history, quiz, adjudication and export, plus a fuzz test over every item endpoint.
 - [ ] **FR-51** Invites: single use, 7-day expiry, bound to a role and clearance; stored hashed. The `invites` table exists.
 - [~] **FR-52** Labeler management. Done: list and `revoke_sessions`. Still needed: pause, resume, revoke endpoint, clearance change (owner only), password reset, per-labeler stats.
 - [~] **FR-53** Audit log. Done: table, `create_owner`, `login`. Still needed: clearance changes, exports, imports, adjudications, gold edits.
@@ -93,8 +93,8 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [ ] **FR-30** Rolling gold accuracy; auto-pause and a retraining quiz.
 
 ### Batches and queue (§4.5)
-- [ ] **FR-31** Batches with `overlap_target ≥ 2`, `tier_ceiling`, span policy and status.
-- [ ] **FR-32** Overlap-aware `next`: complete pairs first, then priority, then random; property test with 5 labelers × 200 items. The old routing was breadth-first, the opposite **[eval, §2]**.
+- [~] **FR-31** Batches with `overlap_target ≥ 2`, `tier_ceiling`, span policy and status. Done: schema, import `--batch`, open/close (CLI + API). Still needed: create/edit batch settings.
+- [x] **FR-32** Overlap-aware `next`: complete pairs first, then priority, then random; the property test with 5 labelers × 200 items passes. The old routing was breadth-first, the opposite **[eval, §2]**.
 - [ ] **FR-35** Progress and ETA.
 - [ ] **FR-21** Edit the last 20 submissions; versioned annotations.
 
@@ -108,7 +108,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 
 ### Operations
 - [~] **NFR-6** WAL is on. Still needed: nightly online backup to `outputs/e13_labeler/backups/`; a no-hard-delete policy in code.
-- [ ] **NFR-7** Record the app git commit per annotation (`annotations.app_version` exists) and the DB checksum in the export manifest.
+- [~] **NFR-7** The app version and git commit are recorded per annotation. Still needed: the DB checksum in the export manifest.
 - [x] **NFR-10** One `run.sh`, configured by env vars. It binds 127.0.0.1 unless `HOST` is set (the old script bound `0.0.0.0` with `--reload`).
 
 ## M3: extensions

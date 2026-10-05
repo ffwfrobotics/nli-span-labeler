@@ -48,6 +48,30 @@ def single_user() -> bool:
     return _flag("SINGLE_USER")
 
 
+def app_version() -> str:
+    """Package version plus git commit, recorded on every annotation (NFR-7)."""
+    global _APP_VERSION
+    if _APP_VERSION is None:
+        import subprocess
+
+        from . import __version__
+
+        commit = os.environ.get("E13_APP_COMMIT")
+        if not commit:
+            try:
+                commit = subprocess.run(
+                    ["git", "rev-parse", "--short=12", "HEAD"], cwd=REPO_DIR,
+                    capture_output=True, text=True, timeout=5,
+                ).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                commit = ""
+        _APP_VERSION = f"{__version__}+{commit}" if commit else __version__
+    return _APP_VERSION
+
+
+_APP_VERSION = None
+
+
 SESSION_EXPIRY_DAYS = int(os.environ.get("SESSION_EXPIRY_DAYS", "30"))
 LOCK_TIMEOUT_MINUTES = int(os.environ.get("LOCK_TIMEOUT_MINUTES", "20"))
 COOKIE_SECURE = _flag("COOKIE_SECURE")

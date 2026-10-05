@@ -4,6 +4,7 @@ Command-line entry point.
     python -m e13_labeler init-db
     python -m e13_labeler create-owner [--login NAME]
     python -m e13_labeler import FILE [--batch NAME] [--replace] [--allow-lower-tier]
+    python -m e13_labeler batch {list|open|close|draft} [NAME]
     python -m e13_labeler serve [--host 127.0.0.1] [--port 8000] [--reload]
 """
 
@@ -68,6 +69,33 @@ def cmd_import(args) -> int:
     return 1 if report.n_rejected else 0
 
 
+def cmd_batch(args) -> int:
+    """List batches, or change one's status (FR-31)."""
+    from .batches import set_status
+
+    init_db()
+    with get_db() as conn:
+        if args.action == "list":
+            for r in conn.execute(
+                """SELECT b.name, b.status, b.overlap_target, b.tier_ceiling,
+                          (SELECT COUNT(*) FROM batch_items WHERE batch_id = b.id) AS n
+                   FROM batches b ORDER BY b.id"""
+            ):
+                print(f"{r['name']}\t{r['status']}\titems={r['n']}\toverlap={r['overlap_target']}"
+                      f"\tceiling={r['tier_ceiling']}")
+            return 0
+        if not args.name:
+            print("A batch name is required", file=sys.stderr)
+            return 2
+        try:
+            set_status(conn, args.name, args.action)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
+    print(f"{args.name}: {args.action}")
+    return 0
+
+
 def cmd_serve(args) -> int:
     import uvicorn
 
@@ -98,6 +126,12 @@ def main(argv=None) -> int:
     p.add_argument("--allow-lower-tier", action="store_true",
                    help="owner only: let a replacement lower an item's permissions tier (logged)")
     p.set_defaults(func=cmd_import)
+
+    p = sub.add_parser("batch", help="list batches or set a batch's status")
+    p.add_argument("action", choices=["list", "open", "close", "draft"])
+    p.add_argument("name", nargs="?")
+    p.set_defaults(func=lambda a: cmd_batch(argparse.Namespace(
+        action={"close": "closed"}.get(a.action, a.action), name=a.name)))
 
     p = sub.add_parser("serve", help="run the web app")
     p.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
