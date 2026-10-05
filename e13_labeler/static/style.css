@@ -1104,3 +1104,12 @@ pre.json-block { white-space: pre-wrap; font-size: 0.8rem; color: var(--text-sec
 .history-row[disabled] { opacity: 0.5; cursor: default; }
 
 .dash-line { font-size: 0.85rem; margin: 4px 0; line-height: 1.6; }
+
+/* Adjudication (FR-43, §6.5) */
+.modal.adjudication { max-width: 1200px; width: 95vw; }
+.adj-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; margin-top: 8px; }
+.adj-state { white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; margin: 4px 0 10px;
+             padding: 8px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.85rem; }
+.adj-span { display: block; margin: 3px 0; font-size: 0.85rem; }
+.adjudication .form-group input[type=text], .adjudication textarea { width: 100%; }
+@media (max-width: 900px) { .adj-grid { grid-template-columns: 1fr; } }

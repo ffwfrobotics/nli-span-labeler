@@ -29,7 +29,7 @@ def _validate(conn: sqlite3.Connection, item_id: str, answerable: bool, reasons:
     if answerable and reasons:
         problems.append("answerable excludes every reason")
     if not answerable and not reasons:
-        problems.append("gold needs answerable or at least one reason")
+        problems.append("choose answerable or at least one reason")
     for reason, alts in (alternatives or {}).items():
         if reason not in REASONS or not isinstance(alts, list) or set(alts) - set(REASONS):
             problems.append(f"alternatives must map reasons to lists of reasons ({reason!r})")

@@ -299,6 +299,10 @@ function handleKeyDown(e) {
         if (e.key === 'Escape') hideHistory();
         return;
     }
+    if (!document.getElementById('adjudication-modal').classList.contains('hidden')) {
+        if (e.key === 'Escape') hideAdjudication();
+        return;
+    }
     if (!document.getElementById('agreement-modal').classList.contains('hidden')) return;
     if (e.ctrlKey || e.metaKey) return;  // leave browser shortcuts alone
     // The labelling keys (§6.2) live in label.js
@@ -453,6 +457,7 @@ async function runExport() {
 async function loadAdmin() {
     authenticatedFetch('/api/admin/agreement?n_boot=1000').then(r => r.json()).then(renderAgreement)
         .catch(e => showMessage(e.message, 'error'));
+    loadAdjudicationQueue();
     try {
         const [labelers, flags, batches, progress] = await Promise.all([
             authenticatedFetch('/api/admin/labelers').then(r => r.json()),

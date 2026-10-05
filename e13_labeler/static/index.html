@@ -112,6 +112,15 @@
         </div>
     </div>
 
+    <!-- Adjudication (FR-43, §6.5) -->
+    <div id="adjudication-modal" class="modal-overlay hidden">
+        <div class="modal modal-wide modal-tall modal-relative adjudication">
+            <button class="modal-close" onclick="hideAdjudication()">&times;</button>
+            <h2 id="adj-title">Adjudicate</h2>
+            <div id="adj-body"></div>
+        </div>
+    </div>
+
     <div class="container wide">
         <header>
             <h1>E13 Labeler</h1>
@@ -213,6 +222,16 @@
                     <tbody></tbody>
                 </table>
             </div>
+            <div class="card" id="adjudication-card">
+                <div class="labels-header">
+                    <h3>Adjudication</h3>
+                    <span class="question-type" id="adjudication-meta"></span>
+                </div>
+                <table class="admin-table" id="adjudication-table">
+                    <thead><tr><th>Item</th><th>Disagreements</th><th>Labels</th><th>Batch</th><th></th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
             <div class="card">
                 <h3>Pending flags</h3>
                 <table class="admin-table" id="flags-table">
@@ -226,5 +245,6 @@
     <script src="/static/app.js"></script>
     <script src="/static/label.js"></script>
     <script src="/static/onboarding.js"></script>
+    <script src="/static/adjudicate.js"></script>
 </body>
 </html>

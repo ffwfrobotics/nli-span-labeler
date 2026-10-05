@@ -1199,6 +1199,64 @@ async def retire_gold_item(item_id: str, admin: dict = Depends(require_admin)):
         return _gold_call(lambda: retire_gold(conn, item_id, admin["id"]))
 
 
+# ============================================================================
+# API Endpoints - Adjudication (FR-43)
+# ============================================================================
+
+async def require_internal_admin(admin: dict = Depends(require_admin)) -> dict:
+    """FR-43: adjudicators are internal admins."""
+    if admin["clearance"] != "internal":
+        raise HTTPException(403, "Adjudication needs internal clearance")
+    return admin
+
+
+class AdjudicationIn(BaseModel):
+    answerable: bool = False
+    reasons: list[str] = Field(default_factory=list)
+    spans: list[SpanIn] = Field(default_factory=list)
+    note: Optional[str] = Field(None, max_length=2000)
+    promote: bool = Field(False, description="Also save the result as gold (FR-29)")
+    explanation: Optional[str] = Field(None, max_length=4000, description="Gold explanation, when promoting")
+    alternatives: dict[str, list[str]] = Field(default_factory=dict)
+
+
+@app.get("/api/admin/adjudication", tags=["Admin"], summary="Adjudication queue")
+async def adjudication_queue(batch: Optional[list[str]] = Query(None), include_done: bool = False,
+                             admin: dict = Depends(require_internal_admin)):
+    """Items whose labelers disagree on any reason or on answerable, most disagreements first."""
+    from .adjudication import queue
+
+    with get_db() as conn:
+        items = queue(conn, _admin_filters(admin, batch), include_done)
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/admin/adjudication/{item_id:path}", tags=["Admin"], summary="Labels side by side")
+async def adjudication_detail(item_id: str, admin: dict = Depends(require_internal_admin)):
+    """All labels of the item, anonymised as L-a, L-b, ..., with any earlier adjudication and gold."""
+    from .adjudication import detail
+
+    with get_db() as conn:
+        fetch_visible_item(conn, item_id, admin)
+        try:
+            return detail(conn, item_id, _admin_filters(admin))
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+
+
+@app.post("/api/admin/adjudication/{item_id:path}", tags=["Admin"], summary="Save an adjudication")
+async def adjudication_save(item_id: str, body: AdjudicationIn, admin: dict = Depends(require_internal_admin)):
+    """Stored apart from the raw labels, as a new version; α never changes. Optionally promoted to gold."""
+    from .adjudication import save
+
+    with get_db() as conn:
+        fetch_visible_item(conn, item_id, admin)
+        return _gold_call(lambda: save(
+            conn, item_id, admin, answerable=body.answerable, reasons=body.reasons,
+            spans=[s.model_dump() for s in body.spans], note=body.note, promote=body.promote,
+            explanation=body.explanation, alternatives=body.alternatives, filters=_admin_filters(admin)))
+
+
 class ExportIn(BaseModel):
     kinds: list[str] = Field(default_factory=lambda: ["annotations", "training", "agreement", "items"])
     batches: list[str] = Field(default_factory=list)

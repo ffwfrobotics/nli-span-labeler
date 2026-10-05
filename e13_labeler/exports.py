@@ -82,6 +82,16 @@ def _majority(votes: int, n: int) -> Optional[bool]:
     return None  # tie (§5.5: ties stay null)
 
 
+def adjudicated(conn: sqlite3.Connection, item_id: str) -> Optional[dict]:
+    """The latest adjudication (FR-43): answerable, reasons, spans, version, adjudicator."""
+    from .adjudication import as_dict, latest
+
+    out = as_dict(conn, latest(conn, item_id))
+    if out:
+        out.pop("note")  # free text stays in the app
+    return out
+
+
 def training_rows(conn: sqlite3.Connection, filters: Filters, text_included: bool = True) -> list[dict]:
     """
     One row per item whose human, blind, first-pass labels reach the item's
@@ -137,7 +147,7 @@ def training_rows(conn: sqlite3.Connection, filters: Filters, text_included: boo
             elif m is None:
                 ties.append(reason)
         abstain_evidence, plain_evidence = merge_spans(recs)
-        adjudication = conn.execute("SELECT * FROM adjudications WHERE item_id = ?", (item_id,)).fetchone()
+        adjudication = adjudicated(conn, item_id)
         guideline_versions = sorted({b["guideline_version"] for b in batches if b["guideline_version"]})
 
         row = {
@@ -163,8 +173,7 @@ def training_rows(conn: sqlite3.Connection, filters: Filters, text_included: boo
         row["human"] = {
             "n_labelers": n, "labelers": labelers, "answerable_votes": answerable_votes,
             "majority": {"answerable": _majority(answerable_votes, n), "reasons": majority, "tied_reasons": ties},
-            "adjudicated": None if adjudication is None else {
-                "reasons": json.loads(adjudication["reasons_json"]), "spans": json.loads(adjudication["spans_json"])},
+            "adjudicated": adjudication,
             "batch": recs[0]["batch"] if len(batches) == 1 else sorted(b["name"] for b in batches),
             "guideline_version": guideline_versions[0] if len(guideline_versions) == 1 else (guideline_versions or None),
             "reason_set": "all10" if reason_set == list(REASONS) else reason_set,
