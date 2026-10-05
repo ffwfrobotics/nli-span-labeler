@@ -147,20 +147,13 @@ async def single_user_guard(request: Request, call_next):
 
 @app.middleware("http")
 async def request_logging_middleware(request: Request, call_next):
-    """Log all requests with timing, IP and labeler pseudonym."""
+    """Log all requests with timing, IP and the pseudonym the auth dependency resolved."""
     start_time = time.time()
     response = await call_next(request)
     duration_ms = (time.time() - start_time) * 1000
 
-    who = "anon"
-    token = request.cookies.get(config.SESSION_COOKIE)
-    if token:
-        try:
-            labeler = get_labeler_from_session(token)
-            if labeler:
-                who = labeler["pseudonym"]
-        except Exception:
-            pass  # Don't break the request on a logging failure
+    labeler = getattr(request.state, "labeler", None)
+    who = labeler["pseudonym"] if labeler else "anon"
 
     # Format: ISO timestamp | IP | METHOD /path | status | duration | labeler
     log_line = (

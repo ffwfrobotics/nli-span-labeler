@@ -360,27 +360,32 @@ class TestAssignment:
         with get_db() as conn:
             import_rows(conn, rows, "generated", "x", batch="prop")
             set_status(conn, "prop", "open")
+        from e13_labeler.app import app
+
         names = [f"lab{i}" for i in range(5)]
+        clients = {}
         for n in names:
             make_labeler(n)
+            clients[n] = TestClient(app)  # one session per labeler, so each logs in once
+            login(clients[n], n)
 
         rng = random.Random(3)
         served = {n: [] for n in names}
         active = list(names)
         while active:
             n = rng.choice(active)
-            login(fresh_client, n)
-            response = fresh_client.get("/api/next")
+            client = clients[n]
+            response = client.get("/api/next")
             if response.status_code == 404:
                 active.remove(n)
                 continue
             item_id = response.json()["item_id"]
             served[n].append(item_id)
             if rng.random() < 0.05:
-                fresh_client.post("/api/skip", json={"item_id": item_id, "code": "cannot_judge"})
+                client.post("/api/skip", json={"item_id": item_id, "code": "cannot_judge"})
             else:
                 body = {"answerable": True} if rng.random() < 0.5 else {"reasons": ["not_enough_info"]}
-                assert submit(fresh_client, item_id, **body).status_code == 200
+                assert submit(client, item_id, **body).status_code == 200
 
         for n in names:
             assert len(served[n]) == len(set(served[n])), n

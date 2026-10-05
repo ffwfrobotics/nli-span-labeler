@@ -184,11 +184,13 @@ async def get_current_labeler(request: Request) -> dict:
             owner = get_owner(conn)
         if not owner:
             raise HTTPException(503, "SINGLE_USER=1 but no owner exists. Run: python -m e13_labeler create-owner")
-        return labeler_dict(owner)
+        request.state.labeler = labeler_dict(owner)
+        return request.state.labeler
 
     labeler = get_labeler_from_session(request.cookies.get(config.SESSION_COOKIE))
     if not labeler:
         raise HTTPException(401, "Not authenticated. Please log in.")
+    request.state.labeler = labeler  # for the request log, without a second lookup
     return labeler
 
 
