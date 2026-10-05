@@ -31,3 +31,6 @@ data/nli/*.jsonl
 *.jsonl
 !scripts/*.jsonl
 nli_session_state.json
+
+# E13 test fixtures are deliberate, small, libre-only (docs/e13/fixtures/SOURCES.md)
+!docs/e13/fixtures/*.jsonl
