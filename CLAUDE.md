@@ -1,4 +1,16 @@
-# NLI Span Labeler - GoblinCorps Development Guide
+# E13 Labeler - GoblinCorps Development Guide
+
+## Project
+
+This repo was the NLI span labeler. It is being rebuilt as the **E13 labeler**
+(`docs/e13/E13_LABELING_APP_REQUIREMENTS.md`). Work is tracked in `ROADMAP.md`:
+tick items off there as they land.
+
+- Code: the `e13_labeler/` package (FastAPI + SQLite + one static page, no build step).
+- Run: `uv sync`, then `uv run python -m e13_labeler create-owner`, then `./run.sh`.
+- Test: `uv run pytest`. Tests must run offline.
+- Each MUST requirement's "Test" in the requirements doc becomes a pytest.
+- Never put personal names or emails in code, config or fixtures (NFR-4).
 
 ## Team Members & GitHub Usernames
 

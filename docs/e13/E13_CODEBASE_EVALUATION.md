@@ -4,7 +4,7 @@
 **Evaluated tree:** `72c9bbb` (the last GoblinCorps merge), plus the merged `feature/e13-labeler-requirements` and `feature/untracked-workspace-files` branches.
 **Against:** `docs/e13/E13_LABELING_APP_REQUIREMENTS.md` (draft, 2026-10-05).
 
-This is a pre-fork snapshot. After it, the old app can be changed or replaced freely.
+This is a pre-fork snapshot. Line numbers refer to `app.py` and `static/index.html` at `72c9bbb` (local tag `legacy-final`). Since then the app has been hollowed out into `e13_labeler/`, and the follow-up work is tracked in `ROADMAP.md`.
 
 ---
 
