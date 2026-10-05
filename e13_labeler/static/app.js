@@ -32,6 +32,7 @@ const SHORTCUTS = [
         ['z', 'Undo the last action'],
         ['?', 'This help'],
         ['g', 'Open the guideline'],
+        ['e', 'Edit one of your last 20 submissions (Esc leaves the edit)'],
     ]},
 ];
 
@@ -294,6 +295,10 @@ function handleKeyDown(e) {
         if (e.key === 'Escape') hideGuideline();
         return;
     }
+    if (!document.getElementById('history-modal').classList.contains('hidden')) {
+        if (e.key === 'Escape') hideHistory();
+        return;
+    }
     if (!document.getElementById('agreement-modal').classList.contains('hidden')) return;
     if (e.ctrlKey || e.metaKey) return;  // leave browser shortcuts alone
     // The labelling keys (§6.2) live in label.js
@@ -402,24 +407,36 @@ async function loadAdmin() {
     authenticatedFetch('/api/admin/agreement?n_boot=1000').then(r => r.json()).then(renderAgreement)
         .catch(e => showMessage(e.message, 'error'));
     try {
-        const [labelers, flags, batches] = await Promise.all([
+        const [labelers, flags, batches, progress] = await Promise.all([
             authenticatedFetch('/api/admin/labelers').then(r => r.json()),
             authenticatedFetch('/api/admin/flags').then(r => r.json()),
             authenticatedFetch('/api/admin/batches').then(r => r.json()),
+            authenticatedFetch('/api/admin/progress').then(r => r.json()),
         ]);
-        document.querySelector('#batches-table tbody').innerHTML = batches.batches.map(b => `
+        const prog = Object.fromEntries(progress.batches.map(p => [p.name, p]));
+        document.querySelector('#batches-table tbody').innerHTML = batches.batches.map(b => {
+            const p = prog[b.name] || { items_by_label_count: {} };
+            const c = p.items_by_label_count;
+            return `
             <tr><td>${escapeHtml(b.name)}</td><td>${escapeHtml(b.status)}</td><td>${b.n_items}</td>
                 <td>${b.relabel_of ? '–' : b.overlap_target}</td>
+                <td>${c['0'] ?? '–'} / ${c['1'] ?? '–'} / ${c['2'] ?? '–'} / ${c['3+'] ?? '–'}</td>
+                <td>${p.pct_complete == null ? '–' : Math.round(p.pct_complete * 100) + '%'}</td>
+                <td title="${p.pace_per_hour ? `${p.pace_per_hour} labels/h over ${p.pace_window}` : ''}">${
+                    p.eta_hours == null ? '–' : (p.eta_hours < 48 ? `${p.eta_hours} h` : `${Math.round(p.eta_hours / 24)} d`)}</td>
                 <td>${b.reliability_subset ? `${b.reliability_subset} items × ${b.reliability_overlap}` : '–'}</td>
                 <td>${b.relabel_of ? `${escapeHtml(b.relabel_of)} (after ${b.relabel_after_days}d)` : '–'}</td>
-                <td>${escapeHtml(b.tier_ceiling)}</td></tr>`).join('')
-            || '<tr><td colspan="7">No batches yet: python -m e13_labeler import FILE --batch NAME</td></tr>';
+                <td>${escapeHtml(b.tier_ceiling)}</td></tr>`;
+        }).join('')
+            || '<tr><td colspan="10">No batches yet: python -m e13_labeler import FILE --batch NAME</td></tr>';
         document.querySelector('#labelers-table tbody').innerHTML = labelers.labelers
             .filter(l => l.kind === 'human').map(labelerRow).join('');
         document.querySelector('#flags-table tbody').innerHTML = flags.flags.map(f => `
             <tr><td>${escapeHtml(f.item_id)}</td><td>${escapeHtml(f.kind)}</td><td>${escapeHtml(f.note || '')}</td>
-                <td>${escapeHtml(f.pseudonym)}</td><td>${escapeHtml(f.created_at)}</td></tr>`).join('')
-            || '<tr><td colspan="5">No pending flags</td></tr>';
+                <td>${escapeHtml(f.pseudonym)}</td><td>${escapeHtml(f.created_at)}</td>
+                <td><button class="btn btn-small" onclick="resolveFlag(${f.id}, 'resolved')">Resolved</button>
+                    <button class="btn btn-small" onclick="resolveFlag(${f.id}, 'dismissed')">Dismiss</button></td></tr>`).join('')
+            || '<tr><td colspan="6">No pending flags</td></tr>';
     } catch (e) {
         showMessage(e.message, 'error');
     }
@@ -464,6 +481,17 @@ async function labelerAction(pseudonym, action, clearance) {
         document.getElementById('invite-result').textContent =
             `Reset link for ${pseudonym} (shown once, expires ${data.expires_at}): ${location.origin}${data.path}`;
     }
+    loadAdmin();
+}
+
+async function resolveFlag(id, status) {
+    const resolution = prompt(`${status === 'resolved' ? 'What was done' : 'Why dismiss it'}? (optional)`);
+    if (resolution === null) return;
+    const resp = await authenticatedFetch(`/api/admin/flags/${id}/resolve`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, resolution: resolution || null }),
+    });
+    if (!resp.ok) showMessage('Could not update the flag', 'error');
     loadAdmin();
 }
 

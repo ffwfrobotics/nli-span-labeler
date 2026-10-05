@@ -494,11 +494,13 @@ async function submitItem(override) {
         active_ms: Math.round(L.timer.active),
     };
     if (L.quiz) return submitQuizAnswer(body);  // onboarding.js
-    const resp = await authenticatedFetch('/api/annotations', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    });
+    const resp = L.edit
+        ? await authenticatedFetch(`/api/annotations/${L.edit.annotation_id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        : await authenticatedFetch('/api/annotations', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (resp.ok) {
-        showMessage('Saved', 'success');
+        showMessage(L.edit ? `Saved as version ${(await resp.json()).version}` : 'Saved', 'success');
         return loadNextItem();
     }
     const detail = (await resp.json()).detail;
@@ -529,6 +531,46 @@ async function flagItem(kind) {
     const data = await resp.json();
     setBanner(resp.ok ? null : data.detail);
     if (resp.ok) showMessage(`Flagged (${kind})`, 'success');
+}
+
+// ============================================================================
+// History: edit one of the last 20 submissions (FR-21)
+// ============================================================================
+
+async function showHistory() {
+    const resp = await authenticatedFetch('/api/history');
+    if (!resp.ok) return;
+    const rows = (await resp.json()).submissions;
+    document.getElementById('history-list').innerHTML = rows.length ? rows.map(r => `
+        <button class="history-row" ${r.editable ? '' : 'disabled'} onclick="editSubmission(${r.annotation_id})">
+            <span>${escapeHtml(r.item_id)}</span>
+            <span>${r.answerable ? 'answerable' : escapeHtml(r.reasons.join(', '))}</span>
+            <span class="question-type">v${r.version} · ${escapeHtml(r.created_at)}${r.editable ? '' : ' · batch closed'}</span>
+        </button>`).join('') : '<p class="option-desc">Nothing to edit yet.</p>';
+    document.getElementById('history-modal').classList.remove('hidden');
+    const first = document.querySelector('#history-list .history-row:not([disabled])');
+    if (first) first.focus();
+}
+
+function hideHistory() {
+    document.getElementById('history-modal').classList.add('hidden');
+}
+
+async function editSubmission(annotationId) {
+    hideHistory();
+    const resp = await authenticatedFetch(`/api/history/${annotationId}`);
+    const data = await resp.json();
+    if (!resp.ok) return showMessage(data.detail || 'Could not open it', 'error');
+    renderItem(data);
+    L.edit = data.edit;
+    L.answerable = data.edit.answerable;
+    L.reasons = new Set(data.edit.reasons);
+    L.active = data.edit.reasons[0] || null;
+    L.spans = data.edit.spans;
+    document.getElementById('note').value = data.edit.note || '';
+    renderReasons();
+    renderSpans();
+    setBanner(`Editing your answer (version ${data.edit.version}). Enter saves version ${data.edit.version + 1}; Esc goes back.`);
 }
 
 // ============================================================================
@@ -645,7 +687,7 @@ function labelKeyDown(e) {
             submitItem(e.shiftKey);
             break;
         case 'x':
-            if (L.quiz) break;  // the quiz has no skip
+            if (L.quiz || L.edit) break;  // no skip in the quiz or when editing
             L.mode = 'skip';
             setBanner('Skip: 1 cannot_judge · 2 broken_item · 3 offensive · 4 too_long · 5 other · Esc cancels');
             break;
@@ -660,7 +702,14 @@ function labelKeyDown(e) {
         case 'g':
             showGuideline(false);
             break;
+        case 'e':
+            if (!L.quiz) showHistory();
+            break;
         case 'Escape':
+            if (L.edit && !L.selection) {
+                loadNextItem();  // leave the edit; the item you were on comes back (its lock is held)
+                break;
+            }
             L.selection = null;
             L.anchor = -1;
             setBanner(null);

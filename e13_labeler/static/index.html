@@ -102,6 +102,16 @@
         </div>
     </div>
 
+    <!-- Edit history (FR-21); "e" opens it while labelling -->
+    <div id="history-modal" class="modal-overlay hidden">
+        <div class="modal modal-wide modal-relative">
+            <button class="modal-close" onclick="hideHistory()">&times;</button>
+            <h2>Your last 20 submissions</h2>
+            <p class="question-type">Pick one to edit it. Every edit is kept as a new version.</p>
+            <div id="history-list"></div>
+        </div>
+    </div>
+
     <div class="container wide">
         <header>
             <h1>E13 Labeler</h1>
@@ -162,7 +172,7 @@
                 <div id="mode-banner" class="mode-banner hidden"></div>
                 <div class="key-hints">
                     <kbd>Enter</kbd> save+next · <kbd>Shift+Enter</kbd> override · <kbd>x</kbd> skip · <kbd>z</kbd> undo ·
-                    <kbd>f</kbd> flag · <kbd>s</kbd>/<kbd>r</kbd>/<kbd>u</kbd>/<kbd>m</kbd> span role · <kbd>Alt</kbd>-drag char-precise ·
+                    <kbd>f</kbd> flag · <kbd>e</kbd> edit earlier · <kbd>s</kbd>/<kbd>r</kbd>/<kbd>u</kbd>/<kbd>m</kbd> span role · <kbd>Alt</kbd>-drag char-precise ·
                     <kbd>?</kbd> help
                 </div>
             </div>
@@ -182,7 +192,7 @@
                     <button class="btn btn-primary btn-small" onclick="runExport()">Export now</button>
                 </div>
                 <table class="admin-table" id="batches-table">
-                    <thead><tr><th>Batch</th><th>Status</th><th>Items</th><th>Overlap</th><th>Reliability subset</th><th>Re-label of</th><th>Ceiling</th></tr></thead>
+                    <thead><tr><th>Batch</th><th>Status</th><th>Items</th><th>Overlap</th><th>Labels 0/1/2/3+</th><th>Complete</th><th>ETA</th><th>Reliability subset</th><th>Re-label of</th><th>Ceiling</th></tr></thead>
                     <tbody></tbody>
                 </table>
                 <div id="export-result" class="question-type" style="margin-top: 8px;"></div>
@@ -206,7 +216,7 @@
             <div class="card">
                 <h3>Pending flags</h3>
                 <table class="admin-table" id="flags-table">
-                    <thead><tr><th>Item</th><th>Kind</th><th>Note</th><th>By</th><th>When</th></tr></thead>
+                    <thead><tr><th>Item</th><th>Kind</th><th>Note</th><th>By</th><th>When</th><th></th></tr></thead>
                     <tbody></tbody>
                 </table>
             </div>

@@ -1095,3 +1095,10 @@ pre.json-block { white-space: pre-wrap; font-size: 0.8rem; color: var(--text-sec
 .quiz-verdict.ok { color: var(--success); }
 .quiz-verdict.bad { color: var(--danger); }
 @media (max-width: 800px) { .guideline-examples { grid-template-columns: 1fr; } }
+
+/* Edit history (FR-21) */
+.history-row { display: grid; grid-template-columns: 2fr 2fr 1.4fr; gap: 10px; width: 100%; text-align: left;
+               background: none; border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px;
+               margin: 4px 0; color: var(--text-primary); cursor: pointer; font: inherit; }
+.history-row:hover:not([disabled]), .history-row:focus { border-color: var(--accent); outline: none; }
+.history-row[disabled] { opacity: 0.5; cursor: default; }

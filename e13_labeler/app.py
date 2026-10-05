@@ -511,15 +511,50 @@ async def flag_item(
 
 @app.get("/api/admin/flags", tags=["Admin"], summary="List flags")
 async def list_flags(status: Optional[str] = "pending", admin: dict = Depends(require_admin)):
+    """Flags on items within the admin's clearance (FR-57)."""
+    allowed = visible_to(admin["clearance"])
     with get_db() as conn:
-        query = """SELECT f.id, f.item_id, f.kind, f.note, f.status, f.created_at, l.pseudonym
-                   FROM flags f JOIN labelers l ON f.labeler_id = l.id"""
-        params = []
+        query = f"""SELECT f.id, f.item_id, f.kind, f.note, f.status, f.created_at, f.resolution, f.resolved_at,
+                           l.pseudonym, r.pseudonym AS resolved_by
+                    FROM flags f JOIN labelers l ON f.labeler_id = l.id LEFT JOIN labelers r ON r.id = f.resolved_by
+                    JOIN items i ON i.item_id = f.item_id
+                    WHERE i.visibility IN ({','.join('?' * len(allowed))})"""
+        params = list(allowed)
         if status:
-            query += " WHERE f.status = ?"
+            query += " AND f.status = ?"
             params.append(status)
         rows = conn.execute(query + " ORDER BY f.created_at DESC", params).fetchall()
     return {"flags": [dict(r) for r in rows], "count": len(rows)}
+
+
+FLAG_RESOLUTIONS = ("resolved", "dismissed")
+
+
+@app.post("/api/admin/flags/{flag_id}/resolve", tags=["Admin"], summary="Resolve or dismiss a flag")
+async def resolve_flag(flag_id: int, status: str = Body("resolved", embed=True),
+                       resolution: Optional[str] = Body(None, embed=True, max_length=2000),
+                       admin: dict = Depends(require_admin)):
+    """FR-44: the flag keeps its history (who, when, what was done); nothing is deleted."""
+    if status not in FLAG_RESOLUTIONS:
+        raise HTTPException(422, f"status must be one of {', '.join(FLAG_RESOLUTIONS)}")
+    with get_db() as conn:
+        flag = conn.execute("SELECT * FROM flags WHERE id = ?", (flag_id,)).fetchone()
+        if flag is None:
+            raise HTTPException(404, "No such flag")
+        fetch_visible_item(conn, flag["item_id"], admin)
+        conn.execute("""UPDATE flags SET status = ?, resolution = ?, resolved_by = ?, resolved_at = ?
+                        WHERE id = ?""", (status, resolution, admin["id"], iso(utcnow()), flag_id))
+        audit(conn, admin["id"], f"flag_{status}", flag["item_id"], {"flag": flag_id, "resolution": resolution})
+    return {"id": flag_id, "status": status}
+
+
+@app.get("/api/admin/progress", tags=["Admin"], summary="Progress and ETA")
+async def admin_progress(admin: dict = Depends(require_admin)):
+    """FR-35: per batch, items at 0/1/2/3+ labels, % complete and ETA; per labeler, today/total/median time."""
+    from .progress import progress
+
+    with get_db() as conn:
+        return progress(conn)
 
 
 # ============================================================================
@@ -864,6 +899,129 @@ async def submit_annotation(body: AnnotationIn, labeler: dict = Depends(require_
         if probe:  # FR-30; no feedback, so the response looks like any other save
             check_auto_pause(conn, labeler)
     return {"status": "saved", "annotation_id": annotation_id, "version": 1,
+            "policy_override": submission.policy_override}
+
+
+# ============================================================================
+# API Endpoints - History and edits (FR-21)
+# ============================================================================
+
+EDIT_WINDOW = 20
+
+
+def _recent_submissions(conn, labeler: dict) -> list:
+    """
+    The labeler's last 20 submissions (first versions, skips excluded), newest
+    first, with their latest version. Items their clearance no longer covers, or
+    that their batch's filters now hide, are left out (FR-50; review §3.5).
+    """
+    firsts = conn.execute(
+        """SELECT a.item_id, a.batch_id, a.id FROM annotations a
+           WHERE a.labeler_id = ? AND a.version = 1 AND a.skipped_code IS NULL AND a.batch_id IS NOT NULL
+           ORDER BY a.id DESC LIMIT ?""", (labeler["id"], EDIT_WINDOW)).fetchall()
+    out = []
+    for f in firsts:
+        batch = conn.execute("SELECT * FROM batches WHERE id = ?", (f["batch_id"],)).fetchone()
+        sql, params = _batch_filter(batch, labeler)
+        if not conn.execute(f"SELECT 1 FROM items i WHERE i.item_id = ? AND {sql}", (f["item_id"], *params)).fetchone():
+            continue
+        latest = conn.execute(
+            """SELECT * FROM annotations WHERE item_id = ? AND labeler_id = ? AND batch_id = ?
+               ORDER BY version DESC LIMIT 1""", (f["item_id"], labeler["id"], f["batch_id"])).fetchone()
+        out.append((latest, batch))
+    return out
+
+
+def _edit_target(conn, labeler: dict, annotation_id: int):
+    """The latest version of one of this labeler's recent submissions, and its batch; else 404/409."""
+    for latest, batch in _recent_submissions(conn, labeler):
+        if conn.execute("SELECT 1 FROM annotations WHERE id = ? AND item_id = ? AND labeler_id = ? AND batch_id = ?",
+                        (annotation_id, latest["item_id"], labeler["id"], batch["id"])).fetchone():
+            if batch["status"] == "closed":
+                raise HTTPException(409, "This batch is closed; its labels can't be edited")
+            return latest, batch
+    raise HTTPException(404, "Not one of your last 20 submissions")
+
+
+def _stored_spans(conn, annotation_id: int) -> list:
+    return [{"side": s["side"], "role": s["role"], "text": s["text"], "option": s["option"], "pointer": s["pointer"],
+             "start": s["start"], "end": s["end"], "reasons": json.loads(s["reasons_json"])}
+            for s in conn.execute("SELECT * FROM spans WHERE annotation_id = ? ORDER BY id", (annotation_id,))]
+
+
+@app.get("/api/history", tags=["Annotation"], summary="My last 20 submissions")
+async def history(labeler: dict = Depends(require_active)):
+    """FR-21: what can still be edited. Gold probes are listed like everything else (blindness)."""
+    with get_db() as conn:
+        rows = _recent_submissions(conn, labeler)
+        return {"submissions": [{
+            "annotation_id": a["id"], "item_id": a["item_id"], "batch": f"batch {b['id']}", "version": a["version"],
+            "answerable": bool(a["answerable"]), "reasons": [r for r, v in json.loads(a["reasons_json"]).items() if v],
+            "created_at": a["created_at"], "editable": b["status"] != "closed",
+        } for a, b in rows]}
+
+
+@app.get("/api/history/{annotation_id}", tags=["Annotation"], summary="One past submission, for editing")
+async def history_item(annotation_id: int, labeler: dict = Depends(require_active)):
+    with get_db() as conn:
+        latest, batch = _edit_target(conn, labeler, annotation_id)
+        item = fetch_visible_item(conn, latest["item_id"], labeler)
+        payload = blind_payload(conn, item, batch, labeler, lock_until=None)
+        payload["asof"] = latest["asof"] or payload["asof"]  # what they saw the first time
+        payload["edit"] = {"annotation_id": latest["id"], "version": latest["version"],
+                           "answerable": bool(latest["answerable"]),
+                           "reasons": [r for r, v in json.loads(latest["reasons_json"]).items() if v],
+                           "note": latest["note"], "spans": _stored_spans(conn, latest["id"])}
+        return payload
+
+
+@app.put("/api/annotations/{annotation_id}", tags=["Annotation"], summary="Edit one of my last 20 submissions")
+async def edit_annotation(annotation_id: int, body: AnnotationIn, labeler: dict = Depends(require_active)):
+    """
+    FR-21: every edit is a new version; the old one is kept (NFR-6). α and the
+    exports use the latest version. Allowed until the batch closes.
+    """
+    submission = Submission(
+        answerable=body.answerable, reasons=body.reasons, note=body.note,
+        spans=[Span(**s.model_dump()) for s in body.spans],
+        policy_override=body.policy_override, active_ms=body.active_ms,
+    )
+    with get_db() as conn:
+        latest, batch = _edit_target(conn, labeler, annotation_id)
+        if body.item_id != latest["item_id"]:
+            raise HTTPException(422, "item_id doesn't match the annotation")
+        item = fetch_visible_item(conn, latest["item_id"], labeler)
+        reason_set = json.loads(batch["reason_set_json"])
+        try:
+            validate_submission(
+                submission, state=item["state"], state_format=item["state_format"],
+                question=json.loads(item["question_json"]), reason_set=reason_set,
+                span_policy=json.loads(batch["span_policy_json"]), require_note=bool(batch["require_note"]),
+            )
+        except PolicyViolation as e:
+            raise HTTPException(422, {"policy": True, "problems": e.problems})
+        except SubmissionError as e:
+            raise HTTPException(422, {"policy": False, "problems": e.problems})
+        version = latest["version"] + 1
+        cur = conn.execute(
+            """INSERT INTO annotations (item_id, batch_id, labeler_id, version, answerable, reasons_json, note,
+                                        policy_override, is_gold_probe, active_ms, guideline_version, app_version,
+                                        asof, position_in_state_run)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (item["item_id"], batch["id"], labeler["id"], version, int(submission.answerable),
+             json.dumps(reasons_json(submission.reasons, reason_set)), submission.note,
+             int(submission.policy_override), latest["is_gold_probe"], submission.active_ms,
+             guideline_in_force(batch), config.app_version(), latest["asof"], latest["position_in_state_run"]),
+        )
+        for s in submission.spans:
+            conn.execute(
+                """INSERT INTO spans (annotation_id, side, option, pointer, start, "end", text, role, reasons_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (cur.lastrowid, s.side, s.option, s.pointer, s.start, s.end, s.text, s.role, json.dumps(s.reasons)),
+            )
+        if latest["is_gold_probe"]:
+            check_auto_pause(conn, labeler)
+    return {"status": "saved", "annotation_id": cur.lastrowid, "version": version,
             "policy_override": submission.policy_override}
 
 
