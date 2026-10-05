@@ -646,7 +646,7 @@ These are taken from `RELEASE_POLICY.md` §2, with the `unverified` handling fro
 | item `permissions` | when | who may see it |
 |---|---|---|
 | `libre` | source class `libre`, and no Jev output attached | `public` and `internal` |
-| `restricted` | source class `restricted` **or `unverified`** or unknown (NC, research-only, gated, or no licence traced: ANLI, MS MARCO, MultiRC, WikiQA, PIQA, GLUE mirrors, `bbc_news`, ...) | `internal` only |
+| `restricted` | source class `restricted` **or `unverified`** or unknown (NC, research-only, gated, or no licence traced: ANLI, MS MARCO, MultiRC, WikiQA, AG News, RACE, Yelp, QQP, GLUE mirrors, `bbc_news`, ...) | `internal` only |
 | `jev` | libre source plus Jev output attached (a model answer, or committee labels from Jev) | `internal` only |
 | `jev+restricted` | both | `internal` only |
 | *never imported* | sources that are eval-only and bar training: LLM-AggreFact (CC-BY-ND, gated), HaluBench (NC) as human-label targets | import refuses them (FR-55) |
