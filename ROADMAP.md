@@ -25,7 +25,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 ### Import (§4.1)
 - [~] **FR-1** Import E09 pool JSONL (`importer.py`). Tested on synthetic rows; still needed: the "first 100 real pool rows, 0 rejected" test on `feature/e13-test-fixtures`.
 - [x] **FR-2** One item per (row, qid); `item_id = "<row id>#<qid>"`. Row ids containing `#` are rejected.
-- [ ] **FR-3** Render `choice` / `score` / `noul` questions; fall back to the qid when `instructions` is missing; pretty-print JSON values.
+- [~] **FR-3** Render `choice` / `score` / `noul` questions; fall back to the qid when `instructions` is missing; pretty-print JSON values. Done in `label.js`; still needed: render fixtures for each case in a test.
 - [x] **FR-4** Detect the state format (`json` when the state is, or parses to, an object or array); `state_format` overrides.
 - [~] **FR-5** Store the state byte-exact, plus `state_sha256`. Still needed: the export → re-import round-trip test (comes with FR-45). A state given as an object is serialised once and that string is stored.
 - [x] **FR-6** Tier resolution: explicit field, then source class; unverified/unknown → restricted; Jev raises.
@@ -38,17 +38,17 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 
 ### Labelling (§4.2, §6.1, §6.2)
 - [x] **FR-12** Blind `GET /api/next` payload (§5.3): no `gold`, `source`, `e13`, `model_answers` or `is_gold_probe`, and no gold-based filters **[eval #1]**.
-- [~] **FR-13** Ten independent reason toggles; `answerable` is exclusive; reject empty submissions. The API is done; the UI toggles are still needed.
-- [~] **FR-14** Note (≤ 2,000 chars), required per batch config (`batches.require_note`). The API is done; the UI is still needed.
-- [~] **FR-15** Span roles support/refute/unsupported/framing, with side validation. The API is done; the UI is still needed.
-- [~] **FR-16** Spans link to an option and to checked reasons. The API is done; the UI is still needed.
-- [~] **FR-17** Coordinates: char offsets, RFC 6901 pointer + offsets, option-side offsets; `text == slice`. Server-side validation is done; the UI is still needed.
-- [ ] **FR-18** Word-snapped selection, Alt for character precision. A new selection model: the old UI was click-per-token with no drag-select.
-- [~] **FR-19** Span policy per reason; block submit; override recorded. The API is done (422 with `policy: true`); the `Shift+Enter` UI is still needed.
-- [~] **FR-20** Skip with a reason code; never re-served to that labeler. The API is done; the `x` + code UI is still needed.
-- [~] **FR-22** Active time (visible tab + interaction in the last 60 s) and wall time. Wall time is measured server-side from lock hand-out; the client-side active-time meter is still needed.
-- [ ] §6.1 labelling screen and §6.2 keyboard map. The help overlay is already generated from the map in `app.js`.
-- [ ] Span rendering: colour **and** underline style per role (§6.1, NFR-9).
+- [x] **FR-13** Ten independent reason toggles; `answerable` is exclusive; reject empty submissions. The API and UI are done.
+- [x] **FR-14** Note (≤ 2,000 chars), required per batch config (`batches.require_note`). The API and UI are done.
+- [x] **FR-15** Span roles support/refute/unsupported/framing, with side validation. The API and UI are done.
+- [x] **FR-16** Spans link to an option and to checked reasons. The API and UI are done.
+- [x] **FR-17** Coordinates: char offsets, RFC 6901 pointer + offsets, option-side offsets; `text == slice`. Validated server-side; produced by the UI.
+- [~] **FR-18** Word-snapped selection, Alt for character precision, plus the keyboard path (←/→, Shift extends). Still needed: highlight the exact characters of a char-precise span; the whole touched words light up now.
+- [x] **FR-19** Span policy per reason; block submit; `Shift+Enter` override, recorded.
+- [x] **FR-20** Skip with a reason code (`x` then `1`…`5`); never re-served to that labeler.
+- [~] **FR-22** Active time (visible tab + interaction in the last 60 s) and wall time from lock hand-out. Both are done; still needed: an automated "hidden tab for 5 min adds < 1 s" browser test.
+- [x] §6.1 labelling screen and §6.2 keyboard map (`static/label.js`). It fits 1366×768; checked in Chromium with `tests/e2e/label_smoke.js`.
+- [x] Span rendering: colour **and** underline style per role (§6.1, NFR-9).
 
 ### Agreement and export
 - [ ] **FR-9** Import model pseudo-labelers (§5.4 JSONL, `labeler_kind: "model"`).
@@ -103,7 +103,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [ ] **FR-41** Full dashboard: candidates vs the min/median of established reasons, confusion matrix, per-labeler gold accuracy.
 - [~] **FR-42** "α unstable" warning (< 30 positives or < 3% prevalence). Computed in `agreement.describe`; still needed: show it on the dashboard.
 - [ ] **FR-43** Adjudication queue, anonymised L-a/L-b, stored separately from raw labels.
-- [~] **FR-44** Flags. Done: API and admin list. Still needed: the `f` key on the labelling screen, resolving flags.
+- [~] **FR-44** Flags. Done: API, admin list and the `f` key. Still needed: resolving flags.
 - [ ] §7.3 monitoring: flag median active time < 5 s and reason prevalence above 3× the batch rate.
 
 ### Operations

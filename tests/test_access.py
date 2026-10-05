@@ -131,5 +131,9 @@ class TestPage:
 
     def test_no_external_assets(self, fresh_client: TestClient):
         """NFR-3: no CDN at runtime."""
-        page = fresh_client.get("/").text
-        assert "http://" not in page and "https://" not in page
+        import re
+
+        for path in ("/", "/static/app.js", "/static/label.js", "/static/style.css"):
+            body = fresh_client.get(path).text
+            assert not re.search(r"""(src|href)\s*=\s*["']?(https?:)?//""", body), path
+            assert "@import" not in body and "url(http" not in body, path

@@ -185,11 +185,13 @@ function handleKeyDown(e) {
         toggleHelpModal();
         return;
     }
-    if (e.key === 'Escape') {
-        hideHelpModal();
+    if (!document.getElementById('help-modal').classList.contains('hidden')) {
+        if (e.key === 'Escape') hideHelpModal();
         return;
     }
-    // The labelling keys (§6.2) attach here with the labelling screen (M1).
+    if (e.ctrlKey || e.metaKey) return;  // leave browser shortcuts alone
+    // The labelling keys (§6.2) live in label.js
+    if (typeof labelKeyDown === 'function') labelKeyDown(e);
 }
 
 // ============================================================================
@@ -214,6 +216,7 @@ function switchTab(tabName) {
     document.getElementById(`${tabName}-tab`).classList.remove('hidden');
     document.querySelector(`.nav-tab[data-tab="${tabName}"]`).classList.add('active');
     if (tabName === 'admin') loadAdmin();
+    if (tabName === 'label' && typeof loadNextItem === 'function' && !L) loadNextItem();
 }
 
 function isAdmin() {
@@ -253,6 +256,7 @@ async function loadAdmin() {
 
 function initializeApp() {
     updateAdminTabVisibility();
+    loadNextItem();
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
