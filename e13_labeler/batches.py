@@ -151,18 +151,36 @@ def create_relabel(conn: sqlite3.Connection, source_name: str, name: str, *, fra
     return describe(conn, conn.execute("SELECT * FROM batches WHERE id = ?", (batch_id,)).fetchone())
 
 
-def open_warnings(conn: sqlite3.Connection, batch: sqlite3.Row) -> list[str]:
-    """What opening this batch means for agreement data."""
-    if batch["relabel_of"] is not None:
-        return ["re-label batch: its α is intra-rater; report it apart from inter-rater α"]
-    if batch["overlap_target"] >= 2:
+MIN_LIBRE_GOLD = 12
+
+
+def libre_gold_warning(conn: sqlite3.Connection) -> list[str]:
+    """FR-58: public labelers only ever see libre gold; warn when there is too little of it."""
+    n_public = conn.execute("""SELECT COUNT(*) FROM labelers WHERE kind = 'human' AND clearance = 'public'
+                               AND status IN ('onboarding', 'active')""").fetchone()[0]
+    if not n_public:
         return []
+    n_gold = conn.execute("""SELECT COUNT(*) FROM gold g JOIN items i ON i.item_id = g.item_id
+                             WHERE g.retired = 0 AND i.visibility = 'libre'""").fetchone()[0]
+    if n_gold >= MIN_LIBRE_GOLD:
+        return []
+    return [f"{n_public} public labeler(s) but only {n_gold} libre gold item(s); their quiz and hidden gold "
+            f"need at least {MIN_LIBRE_GOLD} (FR-58)"]
+
+
+def open_warnings(conn: sqlite3.Connection, batch: sqlite3.Row) -> list[str]:
+    """What opening this batch means for agreement data, and for public labelers' gold."""
+    gold = libre_gold_warning(conn)
+    if batch["relabel_of"] is not None:
+        return ["re-label batch: its α is intra-rater; report it apart from inter-rater α"] + gold
+    if batch["overlap_target"] >= 2:
+        return gold
     subset = conn.execute("SELECT COUNT(*) FROM batch_items WHERE batch_id = ? AND target IS NOT NULL",
                           (batch["id"],)).fetchone()[0]
     if subset:
-        return [f"overlap 1: inter-rater α comes from the {subset}-item reliability subset only"]
+        return [f"overlap 1: inter-rater α comes from the {subset}-item reliability subset only"] + gold
     return ["overlap 1 with no reliability subset: no item gets two labelers; α must come from a re-label "
-            "batch or from model pseudo-labelers (FR-9)"]
+            "batch or from model pseudo-labelers (FR-9)"] + gold
 
 
 def set_status(conn: sqlite3.Connection, name: str, status: str, actor_id=None) -> list[str]:

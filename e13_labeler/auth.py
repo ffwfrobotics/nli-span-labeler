@@ -260,8 +260,12 @@ async def require_active(labeler: dict = Depends(require_agreement)) -> dict:
     still log in and read their own status, but not label.
     """
     if labeler["status"] != "active":
+        # FR-26/FR-30: onboarding accounts and auto-paused ones are sent to the quiz
+        quiz = {"onboarding": "onboarding"}.get(labeler["status"])
+        if labeler["status"] == "paused" and labeler.get("pause_reason") == "gold_accuracy":
+            quiz = "retraining"
         raise HTTPException(403, {"status": labeler["status"], "pause_reason": labeler.get("pause_reason"),
-                                  "message": f"Account is {labeler['status']}"})
+                                  "quiz": quiz, "message": f"Account is {labeler['status']}"})
     return labeler
 
 

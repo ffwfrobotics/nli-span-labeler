@@ -90,6 +90,18 @@
         </div>
     </div>
 
+    <!-- Guideline (FR-26); "g" opens it while labelling -->
+    <div id="guideline-modal" class="modal-overlay hidden">
+        <div class="modal modal-wide modal-tall modal-relative">
+            <button class="modal-close" onclick="hideGuideline()">&times;</button>
+            <h2>Labelling guideline</h2>
+            <div id="guideline-body" class="help-content markdown"></div>
+            <div class="modal-actions">
+                <button class="btn btn-primary hidden" id="guideline-start" onclick="startQuiz()">Start the quiz</button>
+            </div>
+        </div>
+    </div>
+
     <div class="container wide">
         <header>
             <h1>E13 Labeler</h1>
@@ -146,6 +158,7 @@
                     <textarea id="note" class="note-textarea" rows="1" maxlength="2000"
                               placeholder="Optional; required for ambiguous / underspecified / subjective when the batch says so"></textarea>
                 </div>
+                <div id="quiz-feedback" class="quiz-feedback hidden" aria-live="polite"></div>
                 <div id="mode-banner" class="mode-banner hidden"></div>
                 <div class="key-hints">
                     <kbd>Enter</kbd> save+next · <kbd>Shift+Enter</kbd> override · <kbd>x</kbd> skip · <kbd>z</kbd> undo ·
@@ -202,5 +215,6 @@
 
     <script src="/static/app.js"></script>
     <script src="/static/label.js"></script>
+    <script src="/static/onboarding.js"></script>
 </body>
 </html>

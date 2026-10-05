@@ -1,0 +1,48 @@
+{
+  "version": "1-draft",
+  "status": "Draft written for the app. The owner revises it after the pilot (§7.3 step 1) and bumps the version.",
+  "intro": "Each item is a **state** (a short text or JSON record) and a **question** with options. Decide whether the state lets you answer the question with one of the options. If it does, press **Space** (answerable) and Enter. If it doesn't, tick every **abstain reason** that applies (1-0) and mark the words that show it. Judge from the state only: never use what you know about the world. Tick a reason only when you could point at what makes it true.",
+  "spans": "Select words in the state (or in an option's description) and give them a role: **support** (backs an option), **refute** (rules an option out), **unsupported** (an option-side claim the state doesn't back), **framing** (hedges, attributions, quotes, conditionals). Link each span to the reasons it shows. Spans snap to whole words; hold Alt for exact characters.",
+  "reasons": {
+    "unrelated": {
+      "positive": {"state": "The council approved a new cycle lane on Mill Road, to open in spring.", "question": "Did the striker score in Saturday's match?", "verdict": "unrelated", "why": "The state is about a cycle lane; the question is about football. Nothing in it is even on topic."},
+      "negative": {"state": "The club confirmed the striker was injured in training on Friday and missed Saturday's match.", "question": "Did the striker score in Saturday's match?", "verdict": "answerable (false)", "why": "On topic and it settles the question: a player who missed the match didn't score. Topicality is not the issue."}
+    },
+    "not_enough_info": {
+      "positive": {"state": "The striker started Saturday's match and was substituted in the 70th minute.", "question": "Did the striker score in Saturday's match?", "verdict": "not_enough_info", "why": "On topic, but nothing says whether he scored."},
+      "negative": {"state": "The striker started Saturday's match and was substituted in the 70th minute after scoring twice.", "question": "Did the striker score in Saturday's match?", "verdict": "answerable (true)", "why": "The state settles it. Don't tick not_enough_info because the state is short."}
+    },
+    "conflicting_evidence": {
+      "positive": {"state": "The report lists the server as patched on 3 May. The appendix table shows the same server unpatched at the end of May.", "question": "Was the server patched in May?", "verdict": "conflicting_evidence", "why": "One part supports 'true', another refutes it. Mark a support span and a refute span on the same option ('true')."},
+      "negative": {"state": "The server was unpatched on 1 May and patched on 3 May.", "question": "Was the server patched in May?", "verdict": "answerable (true)", "why": "A change over time is not a conflict: both facts are consistent and the answer is yes."}
+    },
+    "non_factual_support": {
+      "positive": {"state": "A spokesperson said the factory would probably close by June.", "question": "Will the factory close by June?", "verdict": "non_factual_support", "why": "The only support is attributed and hedged ('a spokesperson said', 'probably'). Mark the framing span and the support span."},
+      "negative": {"state": "The factory will not close by June, the company confirmed in its filing.", "question": "Will the factory close by June?", "verdict": "answerable (false)", "why": "Negation is not hedging: a negated fact is a refutation. The filing settles it."}
+    },
+    "stale_state": {
+      "positive": {"state": "As of March 2019, the bridge was closed for repairs.", "question": "Is the bridge open? (as of the item's date)", "verdict": "stale_state", "why": "The state is dated and describes something that may have changed by the as-of date. Mark the dated phrase. Judge whether it could have changed, not whether it did."},
+      "negative": {"state": "The bridge was built in 1932.", "question": "Was the bridge built before 1950?", "verdict": "answerable (true)", "why": "A date alone doesn't make a state stale: when a bridge was built can't change."}
+    },
+    "ambiguous": {
+      "positive": {"state": "The driver met the guard at the station. She was carrying a red bag.", "question": "Was the driver carrying a red bag?", "verdict": "ambiguous", "why": "'She' can be read two ways, and the readings give different answers. Say which readings in the note."},
+      "negative": {"state": "The driver met the guard at the station. The driver was carrying a red bag.", "question": "Was the driver carrying a red bag?", "verdict": "answerable (true)", "why": "Only one reading is plausible. Don't tick ambiguous for far-fetched readings."}
+    },
+    "underspecified": {
+      "positive": {"state": "Sales rose 4% in the first quarter.", "question": "Did sales rise more than the competitor's?", "verdict": "underspecified", "why": "The question needs a parameter it doesn't give: which competitor."},
+      "negative": {"state": "Sales rose 4% in the first quarter; the competitor's rose 2%.", "question": "Did sales rise more than the competitor's?", "verdict": "answerable (true)", "why": "The parameter is fixed by context. Underspecified is about the question, not about missing facts (that is not_enough_info)."}
+    },
+    "false_premise": {
+      "positive": {"state": "The museum has been closed since 2020 and has no exhibitions.", "question": "Which artist does the museum's current exhibition feature?", "verdict": "false_premise", "why": "The question presupposes a current exhibition; the state contradicts that. Mark the contradicting span (refute)."},
+      "negative": {"state": "The museum reopened in May.", "question": "Which artist does the museum's current exhibition feature?", "verdict": "not_enough_info", "why": "The state doesn't contradict the presupposition, it just doesn't say. Judge the premise against the state only."}
+    },
+    "no_option_fits": {
+      "positive": {"state": "The meeting was moved to Thursday.", "question": "On which day is the meeting? Options: a) Monday b) Tuesday c) Wednesday", "verdict": "no_option_fits", "why": "The state settles the matter (Thursday), but no option says so."},
+      "negative": {"state": "The meeting was moved from Monday.", "question": "On which day is the meeting? Options: a) Monday b) Tuesday c) Wednesday", "verdict": "not_enough_info", "why": "The state doesn't settle which day; that is not the same as settling it outside the options."}
+    },
+    "subjective": {
+      "positive": {"state": "The new menu has twelve dishes, four of them vegetarian.", "question": "Is the new menu good?", "verdict": "subjective", "why": "The answer depends on taste, not on the state. Say why in the note if the batch asks for one."},
+      "negative": {"state": "The new menu has twelve dishes, four of them vegetarian.", "question": "Does the new menu have more than ten dishes?", "verdict": "answerable (true)", "why": "A count is a fact. Evaluative words in the state ('good', 'popular') don't make the question subjective either."}
+    }
+  }
+}

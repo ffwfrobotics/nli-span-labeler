@@ -290,6 +290,11 @@ function handleKeyDown(e) {
         if (e.key === 'Escape') hideHelpModal();
         return;
     }
+    if (!document.getElementById('guideline-modal').classList.contains('hidden')) {
+        if (e.key === 'Escape') hideGuideline();
+        return;
+    }
+    if (!document.getElementById('agreement-modal').classList.contains('hidden')) return;
     if (e.ctrlKey || e.metaKey) return;  // leave browser shortcuts alone
     // The labelling keys (§6.2) live in label.js
     if (typeof labelKeyDown === 'function') labelKeyDown(e);
@@ -481,7 +486,7 @@ async function createInvite() {
 function initializeApp() {
     updateAdminTabVisibility();
     if (currentUser.needs_agreement) return showAgreement();
-    if (typeof showOnboarding === 'function' && showOnboarding()) return;
+    if (showOnboarding()) return;
     loadNextItem();
 }
 

@@ -276,6 +276,18 @@ def validate_submission(submission: Submission, *, state: str, state_format: str
         submission.policy_override = False  # only record an override that overrode something
 
 
+def item_asof(item) -> str:
+    """
+    The time the question is asked "as of", for stale_state: the generator's
+    e13.asof when set, otherwise today (UTC). Always present, so generated items
+    don't stand out (owner decision on §11 Q7, 2026-10-05).
+    """
+    from datetime import datetime, timezone
+
+    e13 = json.loads(item["e13_json"]) if item["e13_json"] else {}
+    return str(e13.get("asof") or datetime.now(timezone.utc).date().isoformat())
+
+
 def reasons_json(checked: list, reason_set: list) -> dict:
     """§5.1: True = present, False = asked and absent, None = not in the batch's reason set."""
     return {r: (r in checked if r in reason_set else None) for r in REASONS}

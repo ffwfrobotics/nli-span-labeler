@@ -1074,3 +1074,24 @@ pre.json-block { white-space: pre-wrap; font-size: 0.8rem; color: var(--text-sec
 .candidate-row td { background: rgba(251, 191, 36, 0.06); }
 #agreement-view .admin-table td, #agreement-view .admin-table th { padding: 4px 8px; font-size: 0.85rem; }
 #agreement-view details summary { cursor: pointer; color: var(--text-secondary); font-size: 0.85rem; }
+
+/* Onboarding: guideline and quiz feedback (FR-26, FR-27) */
+.markdown h3 { margin: 14px 0 6px; }
+.markdown p { margin: 6px 0; line-height: 1.5; }
+.guideline-reason { border-top: 1px solid var(--border-color); padding: 10px 0; }
+.guideline-reason h4 { margin: 0 0 4px; }
+.guideline-reason .span-rule { font-size: 0.85rem; color: var(--text-secondary); }
+.guideline-examples { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+.guideline-example { border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px; font-size: 0.85rem; }
+.guideline-example.positive { border-left: 4px solid var(--success); }
+.guideline-example.negative { border-left: 4px dashed var(--warning); }
+.example-kind { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary); }
+.example-state { margin: 4px 0; font-family: var(--mono, monospace); }
+.example-question { font-style: italic; }
+.example-why { margin-top: 4px; color: var(--text-secondary); }
+.quiz-feedback { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; }
+.quiz-feedback ul { margin: 4px 0 4px 18px; }
+.quiz-verdict { font-weight: 600; margin-bottom: 4px; }
+.quiz-verdict.ok { color: var(--success); }
+.quiz-verdict.bad { color: var(--danger); }
+@media (max-width: 800px) { .guideline-examples { grid-template-columns: 1fr; } }

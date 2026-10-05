@@ -491,10 +491,13 @@ class TestAssignment:
         for n in names:
             assert len(served[n]) == len(set(served[n])), n
         with get_db() as conn:
-            counts = [r[0] for r in conn.execute(
+            rows = conn.execute(
                 """SELECT (SELECT COUNT(*) FROM annotations a WHERE a.item_id = i.item_id
-                           AND a.skipped_code IS NULL) FROM items i""")]
-        assert counts == [overlap] * n_items
+                           AND a.skipped_code IS NULL),
+                          (SELECT COUNT(*) FROM annotations a WHERE a.item_id = i.item_id
+                           AND a.skipped_code IS NOT NULL) FROM items i""").fetchall()
+        # Exactly the target, unless so many labelers skipped an item that too few were left
+        assert [labels for labels, _ in rows] == [min(overlap, len(names) - skips) for _, skips in rows]
 
     def test_pairs_completed_first(self, db, fresh_client: TestClient):
         """FR-32 ordering: an item someone else labelled comes before a fresh one."""

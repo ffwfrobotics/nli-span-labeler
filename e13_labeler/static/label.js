@@ -482,6 +482,7 @@ function moveCursor(delta, extend) {
 // ============================================================================
 
 async function submitItem(override) {
+    if (L.quiz && L.feedback) return nextQuizQuestion();  // onboarding.js
     const body = {
         item_id: L.item.item_id,
         answerable: L.answerable,
@@ -492,6 +493,7 @@ async function submitItem(override) {
         policy_override: override,
         active_ms: Math.round(L.timer.active),
     };
+    if (L.quiz) return submitQuizAnswer(body);  // onboarding.js
     const resp = await authenticatedFetch('/api/annotations', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
@@ -643,10 +645,12 @@ function labelKeyDown(e) {
             submitItem(e.shiftKey);
             break;
         case 'x':
+            if (L.quiz) break;  // the quiz has no skip
             L.mode = 'skip';
             setBanner('Skip: 1 cannot_judge · 2 broken_item · 3 offensive · 4 too_long · 5 other · Esc cancels');
             break;
         case 'f':
+            if (L.quiz) break;
             L.mode = 'flag';
             setBanner('Flag: 1 bad_item · 2 guideline_unclear · 3 other · Esc cancels');
             break;
@@ -654,7 +658,7 @@ function labelKeyDown(e) {
             undo();
             break;
         case 'g':
-            setBanner('The guideline page arrives with FR-26 (M2).');
+            showGuideline(false);
             break;
         case 'Escape':
             L.selection = null;

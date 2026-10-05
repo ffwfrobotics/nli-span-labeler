@@ -58,13 +58,16 @@ from .labelling import (
     Submission,
     SubmissionError,
     blind_question,
+    item_asof,
     reasons_json,
     validate_submission,
 )
 from .reasons import CANDIDATES, DEFINITIONS, HARD_SPAN_RULES, REASONS, SKIP_CODES
 from .importer import is_jev
+from .quality import check_auto_pause
 from .tiers import tiers_within, visible_to
 from .api_accounts import router as accounts_router, set_session_cookies
+from .api_onboarding import router as onboarding_router
 
 from .ratelimit import limiter
 
@@ -101,6 +104,7 @@ TAGS_METADATA = [
     {"name": "Admin", "description": "Owner/admin endpoints for labeler management."},
     {"name": "Annotation", "description": "Getting, labelling, skipping and flagging items."},
     {"name": "Locking", "description": "Item locks for concurrent labelling."},
+    {"name": "Onboarding", "description": "Guideline, quiz and the retraining quiz."},
 ]
 
 @asynccontextmanager
@@ -124,6 +128,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.include_router(accounts_router)
+app.include_router(onboarding_router)
 app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")
 
 
@@ -259,26 +264,30 @@ def fetch_visible_item(conn, item_id: str, labeler: dict):
     return row
 
 
-def acquire_lock(conn, item_id: str, labeler_id: int, batch_id: Optional[int] = None) -> Optional[str]:
+def acquire_lock(conn, item_id: str, labeler_id: int, batch_id: Optional[int] = None,
+                 gold_probe: bool = False) -> Optional[str]:
     """
     Lock an item for a labeler, or extend their own lock. Returns the expiry,
     or None if someone else holds a live lock. A single upsert, so two labelers
     racing for the same item can't both win. ``batch_id`` records which batch
-    served it, so the submit lands there.
+    served it, so the submit lands there; ``gold_probe`` marks a hidden gold
+    item (FR-28). Extending a live lock keeps both.
     """
     now = utcnow()
     until = iso(now + timedelta(minutes=config.LOCK_TIMEOUT_MINUTES))
     cur = conn.execute(
-        """INSERT INTO locks (item_id, labeler_id, until, served_at, batch_id) VALUES (?, ?, ?, ?, ?)
+        """INSERT INTO locks (item_id, labeler_id, until, served_at, batch_id, gold_probe) VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(item_id) DO UPDATE SET
                served_at = CASE WHEN locks.labeler_id = excluded.labeler_id AND locks.until > ?
                                 THEN locks.served_at ELSE excluded.served_at END,
                asof = CASE WHEN locks.labeler_id = excluded.labeler_id AND locks.until > ?
                            THEN locks.asof ELSE NULL END,
+               gold_probe = CASE WHEN locks.labeler_id = excluded.labeler_id AND locks.until > ?
+                                 THEN MAX(locks.gold_probe, excluded.gold_probe) ELSE excluded.gold_probe END,
                batch_id = COALESCE(excluded.batch_id, locks.batch_id),
                labeler_id = excluded.labeler_id, until = excluded.until
            WHERE locks.labeler_id = excluded.labeler_id OR locks.until <= ?""",
-        (item_id, labeler_id, until, iso(now), batch_id, iso(now), iso(now), iso(now)),
+        (item_id, labeler_id, until, iso(now), batch_id, int(gold_probe), iso(now), iso(now), iso(now), iso(now)),
     )
     return until if cur.rowcount else None
 
@@ -614,24 +623,68 @@ def _eligible(conn, item_id: str, batch, labeler: dict) -> bool:
     ).fetchone() is not None
 
 
-def pick_next(conn, labeler: dict):
+def gold_rates() -> tuple[float, float, int]:
+    """FR-28: (gold_rate_new, gold_rate, warm-up items)."""
+    import os
+
+    return (float(os.environ.get("E13_GOLD_RATE_NEW", "0.20")), float(os.environ.get("E13_GOLD_RATE", "0.05")),
+            int(os.environ.get("E13_GOLD_WARMUP", "50")))
+
+
+def should_probe(rng, n_done: int) -> bool:
+    """Serve hidden gold now? 20% for a labeler's first 50 items, 5% after (FR-28)."""
+    rate_new, rate, warmup = gold_rates()
+    return rng.random() < (rate_new if n_done < warmup else rate)
+
+
+def _probe_candidate(conn, batch, labeler: dict):
+    """
+    A gold item this labeler has never labelled, skipped or seen in a quiz, that
+    the batch's filters allow and nobody else has locked. Owners write gold, so
+    they get no probes.
+    """
+    if labeler["role"] == "owner":
+        return None
+    sql, params = _batch_filter(batch, labeler)
+    return conn.execute(
+        f"""SELECT i.* FROM gold g JOIN items i ON i.item_id = g.item_id
+            WHERE g.retired = 0 AND {sql}
+              AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.item_id = i.item_id AND a.labeler_id = ?)
+              AND NOT EXISTS (SELECT 1 FROM quiz_answers q JOIN quiz_attempts t ON t.id = q.attempt_id
+                              WHERE q.item_id = i.item_id AND t.labeler_id = ?)
+              AND NOT EXISTS (SELECT 1 FROM locks k WHERE k.item_id = i.item_id AND k.until > ?)
+            ORDER BY RANDOM() LIMIT 1""",
+        (*params, labeler["id"], labeler["id"], iso(utcnow())),
+    ).fetchone()
+
+
+def pick_next(conn, labeler: dict, rng=None):
     """
     FR-32: an eligible item (see _eligible_sql) in an open batch that nobody else
     has locked. Items that already have labels from others come first (complete
     pairs early, so α accrues), then batch priority, then random. A labeler who
     still holds a lock on an eligible item gets that item back.
+
+    FR-28: now and then, a hidden gold item instead, served through the batch the
+    ordinary pick came from, so it looks like any other item. Returns
+    (item, batch, is_probe).
     """
+    import random
+
     now = iso(utcnow())
+    batches = _open_batches(conn)
     for held in conn.execute(
-        "SELECT item_id, batch_id FROM locks WHERE labeler_id = ? AND until > ? ORDER BY served_at",
+        "SELECT item_id, batch_id, gold_probe FROM locks WHERE labeler_id = ? AND until > ? ORDER BY served_at",
         (labeler["id"], now),
     ).fetchall():
-        for batch in _open_batches(conn):
+        for batch in batches:
+            if held["gold_probe"] and held["batch_id"] == batch["id"]:
+                return conn.execute("SELECT * FROM items WHERE item_id = ?", (held["item_id"],)).fetchone(), batch, True
             if held["batch_id"] in (None, batch["id"]) and _eligible(conn, held["item_id"], batch, labeler):
-                return conn.execute("SELECT * FROM items WHERE item_id = ?", (held["item_id"],)).fetchone(), batch
+                return conn.execute("SELECT * FROM items WHERE item_id = ?", (held["item_id"],)).fetchone(), batch, False
 
     best = None
-    for batch in _open_batches(conn):
+    for batch in batches:
         sql, params = _eligible_sql(batch, labeler)
         row = conn.execute(
             f"""SELECT i.*, {_human_label_count_sql()} AS n_labels
@@ -647,7 +700,17 @@ def pick_next(conn, labeler: dict):
         key = (row["n_labels"] > 0, batch["priority"])
         if best is None or key > best[0]:
             best = (key, row, batch)
-    return (best[1], best[2]) if best else (None, None)
+    if best is None:
+        return None, None, False
+    _, item, batch = best
+    if batch["relabel_of"] is None:  # re-label passes measure consistency; no probes there
+        n_done = conn.execute("SELECT COUNT(*) FROM annotations WHERE labeler_id = ? AND version = 1",
+                              (labeler["id"],)).fetchone()[0]
+        if should_probe(rng or random, n_done):
+            probe = _probe_candidate(conn, batch, labeler)
+            if probe is not None:
+                return probe, batch, True
+    return item, batch, False
 
 
 def blind_payload(conn, item, batch, labeler: dict, lock_until: str) -> dict:
@@ -675,9 +738,6 @@ def blind_payload(conn, item, batch, labeler: dict, lock_until: str) -> dict:
         "span_policy": {r: ("required" if r in HARD_SPAN_RULES else p)
                         for r, p in json.loads(batch["span_policy_json"]).items() if r in reason_set},
         "require_note": bool(batch["require_note"]),
-        # The time the question is asked "as of", for stale_state: the generator's
-        # e13.asof when set, otherwise today. Always present, so generated items
-        # don't stand out (owner decision on §11 Q7, 2026-10-05).
         "asof": item_asof(item),
         # Batch names can describe the design (e.g. "stale-candidates"); labelers get a neutral one
         "progress": {"batch": batch["name"] if is_admin(labeler) else f"batch {batch['id']}", "done_by_me": done,
@@ -685,19 +745,14 @@ def blind_payload(conn, item, batch, labeler: dict, lock_until: str) -> dict:
     }
 
 
-def item_asof(item) -> str:
-    e13 = json.loads(item["e13_json"]) if item["e13_json"] else {}
-    return str(e13.get("asof") or utcnow().date().isoformat())
-
-
 @app.get("/api/next", tags=["Annotation"], summary="Next item to label")
 async def next_item(labeler: dict = Depends(require_active)):
     """Serve and lock the next item (FR-32), as the blind payload of §5.3 (FR-12)."""
     with get_db() as conn:
-        item, batch = pick_next(conn, labeler)
+        item, batch, probe = pick_next(conn, labeler)
         if item is None:
             raise HTTPException(404, "No items to label right now")
-        until = acquire_lock(conn, item["item_id"], labeler["id"], batch["id"])
+        until = acquire_lock(conn, item["item_id"], labeler["id"], batch["id"], gold_probe=probe)
         if until is None:  # lost a race for the lock; the client just asks again
             raise HTTPException(409, "Item was just taken; request the next one")
         payload = blind_payload(conn, item, batch, labeler, until)
@@ -711,23 +766,39 @@ async def next_item(labeler: dict = Depends(require_active)):
 
 
 def _assignment(conn, item_id: str, labeler: dict):
-    """The item and the open batch a submission belongs to, enforcing visibility, lock and eligibility."""
+    """
+    The item, the open batch a submission belongs to, and whether it is a hidden
+    gold probe, enforcing visibility, lock and eligibility.
+    """
     item = fetch_visible_item(conn, item_id, labeler)
     lock = get_lock_status(conn, item_id)
     if lock and lock["labeler_id"] != labeler["id"]:
         raise HTTPException(409, _locked_message(lock, labeler))
-    served = conn.execute("SELECT batch_id FROM locks WHERE item_id = ? AND labeler_id = ?",
-                          (item_id, labeler["id"])).fetchone()
+    served = conn.execute("SELECT batch_id, gold_probe FROM locks WHERE item_id = ? AND labeler_id = ? AND until > ?",
+                          (item_id, labeler["id"], iso(utcnow()))).fetchone()
     batches = _open_batches(conn)
+    if served and served["gold_probe"]:
+        for batch in batches:
+            if batch["id"] == served["batch_id"] and not conn.execute(
+                    "SELECT 1 FROM annotations WHERE item_id = ? AND labeler_id = ?",
+                    (item_id, labeler["id"])).fetchone():
+                return item, batch, True
     if served and served["batch_id"] is not None:
         batches = sorted(batches, key=lambda b: b["id"] != served["batch_id"])  # the serving batch first
     for batch in batches:
         if _eligible(conn, item_id, batch, labeler):
-            return item, batch
+            return item, batch, False
     if conn.execute("SELECT 1 FROM annotations WHERE item_id = ? AND labeler_id = ?",
                     (item_id, labeler["id"])).fetchone():
         raise HTTPException(409, "You have already labelled or skipped this item")
     raise HTTPException(404, f"Item {item_id} is not in an open batch for you")
+
+
+def guideline_in_force(batch) -> str:
+    """FR-26: the batch can pin a guideline version; otherwise the current one."""
+    from . import guideline
+
+    return batch["guideline_version"] or guideline.version()
 
 
 def _served_asof(conn, item, labeler_id: int) -> str:
@@ -758,7 +829,7 @@ async def submit_annotation(body: AnnotationIn, labeler: dict = Depends(require_
         policy_override=body.policy_override, active_ms=body.active_ms,
     )
     with get_db() as conn:
-        item, batch = _assignment(conn, body.item_id, labeler)
+        item, batch, probe = _assignment(conn, body.item_id, labeler)
         reason_set = json.loads(batch["reason_set_json"])
         try:
             validate_submission(
@@ -773,12 +844,13 @@ async def submit_annotation(body: AnnotationIn, labeler: dict = Depends(require_
 
         cur = conn.execute(
             """INSERT INTO annotations (item_id, batch_id, labeler_id, version, answerable, reasons_json, note,
-                                        policy_override, active_ms, wall_ms, guideline_version, app_version, asof)
-               VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                        policy_override, is_gold_probe, active_ms, wall_ms, guideline_version,
+                                        app_version, asof)
+               VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (item["item_id"], batch["id"], labeler["id"], int(submission.answerable),
              json.dumps(reasons_json(submission.reasons, reason_set)), submission.note,
-             int(submission.policy_override), submission.active_ms,
-             _wall_ms(conn, item["item_id"], labeler["id"]), batch["guideline_version"], config.app_version(),
+             int(submission.policy_override), int(probe), submission.active_ms,
+             _wall_ms(conn, item["item_id"], labeler["id"]), guideline_in_force(batch), config.app_version(),
              _served_asof(conn, item, labeler["id"])),
         )
         annotation_id = cur.lastrowid
@@ -789,6 +861,8 @@ async def submit_annotation(body: AnnotationIn, labeler: dict = Depends(require_
                 (annotation_id, s.side, s.option, s.pointer, s.start, s.end, s.text, s.role, json.dumps(s.reasons)),
             )
         release_lock(conn, item["item_id"], labeler["id"])
+        if probe:  # FR-30; no feedback, so the response looks like any other save
+            check_auto_pause(conn, labeler)
     return {"status": "saved", "annotation_id": annotation_id, "version": 1,
             "policy_override": submission.policy_override}
 
@@ -799,13 +873,13 @@ async def skip_item(body: SkipIn, labeler: dict = Depends(require_active)):
     if body.code not in SKIP_CODES:
         raise HTTPException(422, f"code must be one of {', '.join(SKIP_CODES)}")
     with get_db() as conn:
-        item, batch = _assignment(conn, body.item_id, labeler)
+        item, batch, probe = _assignment(conn, body.item_id, labeler)
         conn.execute(
-            """INSERT INTO annotations (item_id, batch_id, labeler_id, version, skipped_code, note,
+            """INSERT INTO annotations (item_id, batch_id, labeler_id, version, skipped_code, note, is_gold_probe,
                                         wall_ms, guideline_version, app_version, asof)
-               VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)""",
-            (item["item_id"], batch["id"], labeler["id"], body.code, body.note,
-             _wall_ms(conn, item["item_id"], labeler["id"]), batch["guideline_version"], config.app_version(),
+               VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)""",
+            (item["item_id"], batch["id"], labeler["id"], body.code, body.note, int(probe),
+             _wall_ms(conn, item["item_id"], labeler["id"]), guideline_in_force(batch), config.app_version(),
              _served_asof(conn, item, labeler["id"])),
         )
         release_lock(conn, item["item_id"], labeler["id"])

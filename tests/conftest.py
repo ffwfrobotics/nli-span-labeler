@@ -14,6 +14,9 @@ from fastapi.testclient import TestClient
 os.environ["RATE_LIMIT_ENABLED"] = "0"  # Disable rate limiting in tests
 os.environ["COOKIE_SECURE"] = "0"  # the test client speaks plain HTTP; the default is covered in test_auth
 os.environ.pop("SINGLE_USER", None)
+# No hidden gold unless a test asks for it (FR-28 is random by design)
+os.environ["E13_GOLD_RATE_NEW"] = "0"
+os.environ["E13_GOLD_RATE"] = "0"
 
 OWNER_PASSWORD = "owner-pass-123"
 LABELER_PASSWORD = "labeler-pass-123"
