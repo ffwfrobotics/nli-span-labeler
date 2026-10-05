@@ -114,7 +114,13 @@ def cmd_serve(args) -> int:
     if config.single_user() and host not in config.LOOPBACK_HOSTS:
         print("SINGLE_USER=1 binds to loopback only (FR-54); using 127.0.0.1", file=sys.stderr)
         host = "127.0.0.1"
-    uvicorn.run("e13_labeler.app:app", host=host, port=args.port, reload=args.reload)
+    if not config.single_user() and not config.cookie_secure():
+        print("warning: COOKIE_SECURE=0 outside SINGLE_USER mode; only for plain-HTTP testing on a trusted LAN",
+              file=sys.stderr)
+    # Proxy trust lives in one place (auth.client_ip with TRUSTED_PROXIES). uvicorn's own
+    # proxy_headers would otherwise believe X-Forwarded-For from 127.0.0.1 by default.
+    uvicorn.run("e13_labeler.app:app", host=host, port=args.port, reload=args.reload,
+                proxy_headers=False, forwarded_allow_ips="")
     return 0
 
 

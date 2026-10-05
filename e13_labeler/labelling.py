@@ -9,7 +9,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .reasons import DEFAULT_SPAN_POLICY, NOTE_PROMPTING, REASONS, SPAN_ROLES
+from .reasons import DEFAULT_SPAN_POLICY, HARD_SPAN_RULES, NOTE_PROMPTING, REASONS, SPAN_ROLES
 
 NOTE_MAX_CHARS = 2000
 
@@ -191,23 +191,45 @@ def validate_span(span: Span, index: int, state: str, state_format: str, questio
     return []
 
 
-def policy_problems(submission: Submission, span_policy: dict) -> list[str]:
-    """FR-19: required spans for checked reasons."""
+def _span_rule(reason: str, linked: list) -> Optional[str]:
+    """The span rule for one checked reason, or None if it is met."""
+    if reason == "conflicting_evidence":
+        options = {s.option for s in linked if s.role == "support"} & {s.option for s in linked if s.role == "refute"}
+        return None if options else "conflicting_evidence needs a support and a refute span on the same option"
+    if reason == "non_factual_support":
+        roles = {s.role for s in linked}
+        return None if {"framing", "support"} <= roles else "non_factual_support needs a framing span and a support span"
+    if reason == "stale_state":
+        return None if linked else "stale_state needs a span on the dated or time-sensitive phrase"
+    return None if linked else f"{reason} needs at least one span"
+
+
+def hard_rule_problems(submission: Submission) -> list[str]:
+    """
+    Span rules that neither a batch's span policy nor Shift+Enter can relax (owner
+    decisions, 2026-10-05): conflicting_evidence needs a support and a refute span
+    on one option; stale_state needs the dated or time-sensitive phrase.
+    """
     problems = []
     for reason in submission.reasons:
+        if reason in HARD_SPAN_RULES:
+            problem = _span_rule(reason, [s for s in submission.spans if reason in s.reasons])
+            if problem:
+                problems.append(problem)
+    return problems
+
+
+def policy_problems(submission: Submission, span_policy: dict) -> list[str]:
+    """FR-19: the batch's required spans for checked reasons (overridable with Shift+Enter)."""
+    problems = []
+    for reason in submission.reasons:
+        if reason in HARD_SPAN_RULES:
+            continue  # checked by hard_rule_problems
         if span_policy.get(reason, DEFAULT_SPAN_POLICY.get(reason, "optional")) != "required":
             continue
-        linked = [s for s in submission.spans if reason in s.reasons]
-        if reason == "conflicting_evidence":
-            options = {s.option for s in linked if s.role == "support"} & {s.option for s in linked if s.role == "refute"}
-            if not options:
-                problems.append("conflicting_evidence needs a support and a refute span on the same option")
-        elif reason == "non_factual_support":
-            roles = {s.role for s in linked}
-            if not {"framing", "support"} <= roles:
-                problems.append("non_factual_support needs a framing span and a support span")
-        elif not linked:
-            problems.append(f"{reason} needs at least one span")
+        problem = _span_rule(reason, [s for s in submission.spans if reason in s.reasons])
+        if problem:
+            problems.append(problem)
     return problems
 
 
@@ -243,6 +265,9 @@ def validate_submission(submission: Submission, *, state: str, state_format: str
         problems.extend(validate_span(span, i, state, state_format, question, set(checked)))
     if problems:
         raise SubmissionError(problems)
+    hard = hard_rule_problems(submission)
+    if hard:
+        raise SubmissionError(hard)
 
     unmet = policy_problems(submission, span_policy)
     if unmet and not submission.policy_override:

@@ -57,6 +57,11 @@ DEFAULT_SPAN_POLICY = {
     **{r: "optional" for r in ("not_enough_info", "ambiguous", "underspecified", "no_option_fits", "subjective")},
 }
 
+# Span rules no batch policy or override can relax (owner decisions, 2026-10-05):
+# conflicting_evidence needs support + refute on one option; stale_state needs the
+# dated or time-sensitive phrase.
+HARD_SPAN_RULES = frozenset({"conflicting_evidence", "stale_state"})
+
 # FR-14: a batch may require a note when one of these is checked.
 NOTE_PROMPTING = frozenset({"ambiguous", "underspecified", "subjective"})
 

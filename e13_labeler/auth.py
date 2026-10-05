@@ -205,5 +205,16 @@ def require_role(*roles: str):
     return checker
 
 
+async def require_active(labeler: dict = Depends(get_current_labeler)) -> dict:
+    """
+    Labelling, skipping, flagging and lock extension need an active account.
+    Paused, invited, onboarding (quiz not passed, FR-26) and revoked accounts can
+    still log in and read their own status, but not label.
+    """
+    if labeler["status"] != "active":
+        raise HTTPException(403, f"Account is {labeler['status']}")
+    return labeler
+
+
 require_admin = require_role("owner", "admin")
 require_owner = require_role("owner")

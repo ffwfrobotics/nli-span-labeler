@@ -40,6 +40,7 @@ from .auth import (
     is_loopback,
     iso,
     labeler_dict,
+    require_active,
     require_admin,
     utcnow,
     verify_password,
@@ -56,7 +57,7 @@ from .labelling import (
     reasons_json,
     validate_submission,
 )
-from .reasons import CANDIDATES, DEFINITIONS, REASONS, SKIP_CODES
+from .reasons import CANDIDATES, DEFINITIONS, HARD_SPAN_RULES, REASONS, SKIP_CODES
 from .importer import is_jev
 from .tiers import tiers_within, visible_to
 
@@ -140,6 +141,18 @@ if config.CORS_ORIGINS:
 
 
 @app.middleware("http")
+async def host_check(request: Request, call_next):
+    """Refuse unexpected Host headers (DNS rebinding); see config.allowed_hosts()."""
+    allowed = config.allowed_hosts()
+    if "*" not in allowed:
+        host = request.headers.get("host", "").lower()
+        name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+        if host not in allowed and name not in allowed:
+            return JSONResponse({"detail": "Host not allowed"}, status_code=400)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def single_user_guard(request: Request, call_next):
     """FR-54: in SINGLE_USER mode, refuse every request that isn't from loopback."""
     if config.single_user() and not is_loopback(request):
@@ -203,6 +216,15 @@ class LockStatusResponse(BaseModel):
 # Item visibility and locks
 # ============================================================================
 
+def is_admin(labeler: dict) -> bool:
+    return labeler["role"] in ("owner", "admin")
+
+
+def _locked_message(lock: dict, labeler: dict) -> str:
+    """Labelers don't learn who else is working on what (blindness); admins do."""
+    return f"Item is locked by {lock['pseudonym']}" if is_admin(labeler) else "Item is locked by another labeler"
+
+
 def fetch_visible_item(conn, item_id: str, labeler: dict):
     """
     The item row if the labeler's clearance allows it, else 404 (FR-50, FR-57).
@@ -232,10 +254,12 @@ def acquire_lock(conn, item_id: str, labeler_id: int, batch_id: Optional[int] = 
            ON CONFLICT(item_id) DO UPDATE SET
                served_at = CASE WHEN locks.labeler_id = excluded.labeler_id AND locks.until > ?
                                 THEN locks.served_at ELSE excluded.served_at END,
+               asof = CASE WHEN locks.labeler_id = excluded.labeler_id AND locks.until > ?
+                           THEN locks.asof ELSE NULL END,
                batch_id = COALESCE(excluded.batch_id, locks.batch_id),
                labeler_id = excluded.labeler_id, until = excluded.until
            WHERE locks.labeler_id = excluded.labeler_id OR locks.until <= ?""",
-        (item_id, labeler_id, until, iso(now), batch_id, iso(now), iso(now)),
+        (item_id, labeler_id, until, iso(now), batch_id, iso(now), iso(now), iso(now)),
     )
     return until if cur.rowcount else None
 
@@ -305,7 +329,7 @@ async def login(request: Request, credentials: LabelerLogin, response: Response)
         key=config.SESSION_COOKIE,
         value=token,
         httponly=True,
-        secure=config.COOKIE_SECURE,
+        secure=config.cookie_secure(),
         samesite="strict",
         max_age=config.SESSION_EXPIRY_DAYS * 24 * 60 * 60,
     )
@@ -376,7 +400,7 @@ async def get_item_lock_status(item_id: str, labeler: dict = Depends(get_current
     return LockStatusResponse(
         item_id=item_id,
         locked=True,
-        locked_by=status["pseudonym"],
+        locked_by=status["pseudonym"] if is_admin(labeler) else None,
         locked_until=status["until"],
         expires_in_seconds=status["expires_in_seconds"],
         is_own_lock=status["labeler_id"] == labeler["id"],
@@ -391,19 +415,19 @@ async def release_item_lock(item_id: str, labeler: dict = Depends(get_current_la
             return {"status": "released", "item_id": item_id}
         status = get_lock_status(conn, item_id)
     if status:
-        raise HTTPException(403, f"Item is locked by {status['pseudonym']}")
+        raise HTTPException(403, _locked_message(status, labeler))
     return {"status": "not_locked", "item_id": item_id}
 
 
 @app.post("/api/lock/extend/{item_id:path}", tags=["Locking"], summary="Extend lock")
-async def extend_item_lock(item_id: str, labeler: dict = Depends(get_current_labeler)):
+async def extend_item_lock(item_id: str, labeler: dict = Depends(require_active)):
     with get_db() as conn:
         fetch_visible_item(conn, item_id, labeler)
         status = get_lock_status(conn, item_id)
         if not status:
             raise HTTPException(404, "No lock exists for this item")
         if status["labeler_id"] != labeler["id"]:
-            raise HTTPException(403, f"Item is locked by {status['pseudonym']}")
+            raise HTTPException(403, _locked_message(status, labeler))
         until = acquire_lock(conn, item_id, labeler["id"])
     return {
         "status": "extended",
@@ -435,7 +459,7 @@ async def flag_item(
     item_id: str = Body(..., embed=True),
     kind: str = Body(..., embed=True, description="bad_item, guideline_unclear or other"),
     note: Optional[str] = Body(None, embed=True, max_length=2000),
-    labeler: dict = Depends(get_current_labeler),
+    labeler: dict = Depends(require_active),
 ):
     """FR-44: labelers flag an item from the labelling screen; flags go to an admin list."""
     if kind not in FLAG_KINDS:
@@ -626,13 +650,15 @@ def blind_payload(conn, item, batch, labeler: dict, lock_until: str) -> dict:
         "question": blind_question(json.loads(item["question_json"])),
         "reason_set": reason_set,
         "task_type": batch["task_type"],
-        "span_policy": {r: p for r, p in json.loads(batch["span_policy_json"]).items() if r in reason_set},
+        "span_policy": {r: ("required" if r in HARD_SPAN_RULES else p)
+                        for r, p in json.loads(batch["span_policy_json"]).items() if r in reason_set},
         "require_note": bool(batch["require_note"]),
         # The time the question is asked "as of", for stale_state: the generator's
         # e13.asof when set, otherwise today. Always present, so generated items
         # don't stand out (owner decision on §11 Q7, 2026-10-05).
         "asof": item_asof(item),
-        "progress": {"batch": batch["name"], "done_by_me": done,
+        # Batch names can describe the design (e.g. "stale-candidates"); labelers get a neutral one
+        "progress": {"batch": batch["name"] if is_admin(labeler) else f"batch {batch['id']}", "done_by_me": done,
                      "batch_pct": round(complete / total, 4) if total else 0.0},
     }
 
@@ -643,10 +669,8 @@ def item_asof(item) -> str:
 
 
 @app.get("/api/next", tags=["Annotation"], summary="Next item to label")
-async def next_item(labeler: dict = Depends(get_current_labeler)):
+async def next_item(labeler: dict = Depends(require_active)):
     """Serve and lock the next item (FR-32), as the blind payload of §5.3 (FR-12)."""
-    if labeler["status"] in ("paused", "revoked"):
-        raise HTTPException(403, f"Account is {labeler['status']}")
     with get_db() as conn:
         item, batch = pick_next(conn, labeler)
         if item is None:
@@ -654,7 +678,14 @@ async def next_item(labeler: dict = Depends(get_current_labeler)):
         until = acquire_lock(conn, item["item_id"], labeler["id"], batch["id"])
         if until is None:  # lost a race for the lock; the client just asks again
             raise HTTPException(409, "Item was just taken; request the next one")
-        return blind_payload(conn, item, batch, labeler, until)
+        payload = blind_payload(conn, item, batch, labeler, until)
+        # Keep the as-of date shown, so the annotation records exactly what the labeler saw
+        conn.execute("UPDATE locks SET asof = COALESCE(asof, ?) WHERE item_id = ? AND labeler_id = ?",
+                     (payload["asof"], item["item_id"], labeler["id"]))
+        held = conn.execute("SELECT asof FROM locks WHERE item_id = ? AND labeler_id = ?",
+                            (item["item_id"], labeler["id"])).fetchone()
+        payload["asof"] = held["asof"]
+        return payload
 
 
 def _assignment(conn, item_id: str, labeler: dict):
@@ -662,7 +693,7 @@ def _assignment(conn, item_id: str, labeler: dict):
     item = fetch_visible_item(conn, item_id, labeler)
     lock = get_lock_status(conn, item_id)
     if lock and lock["labeler_id"] != labeler["id"]:
-        raise HTTPException(409, f"Item is locked by {lock['pseudonym']}")
+        raise HTTPException(409, _locked_message(lock, labeler))
     served = conn.execute("SELECT batch_id FROM locks WHERE item_id = ? AND labeler_id = ?",
                           (item_id, labeler["id"])).fetchone()
     batches = _open_batches(conn)
@@ -677,6 +708,13 @@ def _assignment(conn, item_id: str, labeler: dict):
     raise HTTPException(404, f"Item {item_id} is not in an open batch for you")
 
 
+def _served_asof(conn, item, labeler_id: int) -> str:
+    """The as-of date the labeler was shown (from the lock), else the item's own."""
+    row = conn.execute("SELECT asof FROM locks WHERE item_id = ? AND labeler_id = ?",
+                       (item["item_id"], labeler_id)).fetchone()
+    return row["asof"] if row and row["asof"] else item_asof(item)
+
+
 def _wall_ms(conn, item_id: str, labeler_id: int) -> Optional[int]:
     row = conn.execute("SELECT served_at FROM locks WHERE item_id = ? AND labeler_id = ?",
                        (item_id, labeler_id)).fetchone()
@@ -686,7 +724,7 @@ def _wall_ms(conn, item_id: str, labeler_id: int) -> Optional[int]:
 
 
 @app.post("/api/annotations", tags=["Annotation"], summary="Submit labels for an item")
-async def submit_annotation(body: AnnotationIn, labeler: dict = Depends(get_current_labeler)):
+async def submit_annotation(body: AnnotationIn, labeler: dict = Depends(require_active)):
     """
     Validates FR-13 to FR-19 and stores one annotation version with its spans.
     Unmet span policy answers 422 with ``policy: true``; resubmit with
@@ -713,12 +751,13 @@ async def submit_annotation(body: AnnotationIn, labeler: dict = Depends(get_curr
 
         cur = conn.execute(
             """INSERT INTO annotations (item_id, batch_id, labeler_id, version, answerable, reasons_json, note,
-                                        policy_override, active_ms, wall_ms, guideline_version, app_version)
-               VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                        policy_override, active_ms, wall_ms, guideline_version, app_version, asof)
+               VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (item["item_id"], batch["id"], labeler["id"], int(submission.answerable),
              json.dumps(reasons_json(submission.reasons, reason_set)), submission.note,
              int(submission.policy_override), submission.active_ms,
-             _wall_ms(conn, item["item_id"], labeler["id"]), batch["guideline_version"], config.app_version()),
+             _wall_ms(conn, item["item_id"], labeler["id"]), batch["guideline_version"], config.app_version(),
+             _served_asof(conn, item, labeler["id"])),
         )
         annotation_id = cur.lastrowid
         for s in submission.spans:
@@ -733,7 +772,7 @@ async def submit_annotation(body: AnnotationIn, labeler: dict = Depends(get_curr
 
 
 @app.post("/api/skip", tags=["Annotation"], summary="Skip an item")
-async def skip_item(body: SkipIn, labeler: dict = Depends(get_current_labeler)):
+async def skip_item(body: SkipIn, labeler: dict = Depends(require_active)):
     """FR-20: skip with a reason code. The item is never served to this labeler again."""
     if body.code not in SKIP_CODES:
         raise HTTPException(422, f"code must be one of {', '.join(SKIP_CODES)}")
@@ -741,10 +780,11 @@ async def skip_item(body: SkipIn, labeler: dict = Depends(get_current_labeler)):
         item, batch = _assignment(conn, body.item_id, labeler)
         conn.execute(
             """INSERT INTO annotations (item_id, batch_id, labeler_id, version, skipped_code, note,
-                                        wall_ms, guideline_version, app_version)
-               VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)""",
+                                        wall_ms, guideline_version, app_version, asof)
+               VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)""",
             (item["item_id"], batch["id"], labeler["id"], body.code, body.note,
-             _wall_ms(conn, item["item_id"], labeler["id"]), batch["guideline_version"], config.app_version()),
+             _wall_ms(conn, item["item_id"], labeler["id"]), batch["guideline_version"], config.app_version(),
+             _served_asof(conn, item, labeler["id"])),
         )
         release_lock(conn, item["item_id"], labeler["id"])
     return {"status": "skipped", "item_id": body.item_id}

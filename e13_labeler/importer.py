@@ -147,9 +147,11 @@ def parse_row(row: dict, source_permissions: Optional[dict] = None) -> list[Item
     # FR-8/FR-56: any Jev output on the row marks every item of the row jev, since
     # the release tier describes the row's labels. Visibility ignores Jev: labelers
     # never see teacher outputs, so only the text's licence decides who sees it.
+    # An explicit `permissions` can't make restricted text visible: visibility is
+    # restricted if either the source class or the row's own tier says so.
     has_jev = any(is_jev(t) for t, answers in model_answers.items() if answers)
     permissions = tiers.max_tier(base_tier, "jev") if has_jev else base_tier
-    visibility = tiers.visibility_of(base_tier)
+    visibility = tiers.visibility_of(tiers.max_tier(src_tier, base_tier))
 
     e13 = row.get("e13") or {}
     if not isinstance(e13, dict):
@@ -198,13 +200,14 @@ class ImportReport:
     n_rows: int = 0
     n_items: int = 0          # new or replaced items
     n_unchanged: int = 0      # already present with the same state hash (FR-10 no-op)
+    n_raised: int = 0         # unchanged state, but newly attached output raised the tier (FR-56)
     n_rejected: int = 0       # rows rejected
     errors: list = field(default_factory=list)   # (line number, message)
     import_run_id: Optional[int] = None
 
     def as_dict(self) -> dict:
         return {k: getattr(self, k) for k in
-                ("file", "n_rows", "n_items", "n_unchanged", "n_rejected", "errors", "import_run_id")}
+                ("file", "n_rows", "n_items", "n_unchanged", "n_raised", "n_rejected", "errors", "import_run_id")}
 
 
 def _dumps(value) -> Optional[str]:
@@ -244,10 +247,17 @@ def import_rows(
             pending = []
             for item in items:
                 existing = conn.execute(
-                    "SELECT state_sha256, permissions FROM items WHERE item_id = ?", (item.item_id,)
+                    "SELECT state_sha256, permissions, visibility FROM items WHERE item_id = ?", (item.item_id,)
                 ).fetchone()
                 if existing and existing["state_sha256"] == item.state_sha256 and not replace:
-                    pending.append((item, "unchanged"))
+                    # FR-10 no-op for the state; but raising a tier is always allowed (FR-56),
+                    # e.g. when Jev answers are attached to an already-imported row.
+                    raised = tiers.max_tier(existing["permissions"], item.permissions)
+                    vis = "restricted" if "restricted" in (existing["visibility"], item.visibility) else "libre"
+                    if (raised, vis) != (existing["permissions"], existing["visibility"]):
+                        pending.append((item, ("raise", raised, vis, existing)))
+                    else:
+                        pending.append((item, "unchanged"))
                     continue
                 if existing and existing["state_sha256"] != item.state_sha256 and not replace:
                     raise RowError(f"{item.item_id}: state differs from the stored one; use --replace")
@@ -266,6 +276,17 @@ def import_rows(
         for item, action in pending:
             if action == "unchanged":
                 report.n_unchanged += 1
+            elif action[0] == "raise":
+                _, raised, vis, existing = action
+                answers = json.loads(conn.execute("SELECT model_answers_json FROM items WHERE item_id = ?",
+                                                  (item.item_id,)).fetchone()[0] or "{}")
+                answers.update(item.model_answers or {})
+                conn.execute("UPDATE items SET permissions = ?, visibility = ?, model_answers_json = ? "
+                             "WHERE item_id = ?", (raised, vis, _dumps(answers or None), item.item_id))
+                audit(conn, actor_id, "raise_tier", item.item_id,
+                      {"from": [existing["permissions"], existing["visibility"]], "to": [raised, vis],
+                       "import_run": run_id})
+                report.n_raised += 1
             else:
                 if action == "replace":
                     old = conn.execute("SELECT permissions FROM items WHERE item_id = ?", (item.item_id,)).fetchone()

@@ -10,7 +10,8 @@ Environment variables:
     SINGLE_USER=1                One owner account, auto-login, loopback only (FR-54)
     LOCK_TIMEOUT_MINUTES=20      How long an item lock lasts (FR-32)
     SESSION_EXPIRY_DAYS=30       Session lifetime
-    COOKIE_SECURE=1              Mark the session cookie Secure (set behind HTTPS)
+    COOKIE_SECURE=1|0            Session cookie Secure flag (default: on, except in SINGLE_USER mode)
+    ALLOWED_HOSTS=a,b            Accepted Host headers (default: loopback names in SINGLE_USER, else any)
     TRUSTED_PROXIES=ip,ip        Proxies whose X-Forwarded-For / X-Real-IP are believed
 
 Rate limiting:
@@ -74,7 +75,23 @@ _APP_VERSION = None
 
 SESSION_EXPIRY_DAYS = int(os.environ.get("SESSION_EXPIRY_DAYS", "30"))
 LOCK_TIMEOUT_MINUTES = int(os.environ.get("LOCK_TIMEOUT_MINUTES", "20"))
-COOKIE_SECURE = _flag("COOKIE_SECURE")
+def cookie_secure() -> bool:
+    """NFR-5: Secure by default. Plain-HTTP multi-user testing needs COOKIE_SECURE=0 explicitly."""
+    value = os.environ.get("COOKIE_SECURE")
+    return (value == "1") if value is not None else not single_user()
+
+
+def allowed_hosts() -> set:
+    """
+    Host headers the app answers. In SINGLE_USER mode only loopback names, so a
+    DNS-rebinding page can't reach the auto-logged-in owner through the browser.
+    """
+    value = os.environ.get("ALLOWED_HOSTS", "").strip()
+    if value:
+        return {h.strip().lower() for h in value.split(",") if h.strip()}
+    return {"127.0.0.1", "localhost", "::1", "[::1]"} if single_user() else {"*"}
+
+
 SESSION_COOKIE = "e13_session"
 TRUSTED_PROXIES = {
     ip.strip() for ip in os.environ.get("TRUSTED_PROXIES", "").split(",") if ip.strip()

@@ -110,8 +110,13 @@ class TestLocks:
             acquire_lock(conn, "src/1#q0", a["id"])
         login(fresh_client, "b")
         status = fresh_client.get("/api/lock/status/src/1%23q0").json()
-        assert status["locked"] and status["locked_by"] == a["pseudonym"] and not status["is_own_lock"]
-        assert fresh_client.post("/api/lock/release/src/1%23q0").status_code == 403
+        # Labelers don't learn who holds a lock (blindness); admins do
+        assert status["locked"] and status["locked_by"] is None and not status["is_own_lock"]
+        response = fresh_client.post("/api/lock/release/src/1%23q0")
+        assert response.status_code == 403 and a["pseudonym"] not in response.text
+        make_labeler("adm", role="admin", clearance="internal")
+        login(fresh_client, "adm")
+        assert fresh_client.get("/api/lock/status/src/1%23q0").json()["locked_by"] == a["pseudonym"]
 
 
 class TestFlags:
@@ -172,3 +177,43 @@ class TestMigrations:
         with db.get_db() as c:
             got = dict(c.execute("SELECT permissions, visibility FROM items").fetchall())
         assert got == {"libre": "libre", "jev": "libre", "restricted": "restricted", "jev+restricted": "restricted"}
+
+
+class TestTierFuzz:
+    """FR-57: a public labeler gets nothing about a restricted item from any endpoint."""
+
+    def test_every_item_route(self, db, public_client: TestClient):
+        import re
+
+        from e13_labeler.app import app
+        from e13_labeler.batches import set_status
+        from e13_labeler.db import get_db
+
+        insert_item("src/secret#q0", "restricted", state="TOP-SECRET-TEXT")
+        with get_db() as conn:
+            conn.execute("INSERT INTO batches (name, reason_set_json) VALUES ('b', '[]')")
+            conn.execute("INSERT INTO batch_items (batch_id, item_id) VALUES (1, 'src/secret#q0')")
+            set_status(conn, "b", "open")
+        item = "src/secret%23q0"
+        checked = 0
+        for route in app.routes:
+            path = getattr(route, "path", "")
+            for method in getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}:
+                if "{item_id" in path:
+                    url = re.sub(r"\{item_id(:path)?\}", item, path)
+                    response = public_client.request(method, url)
+                elif path in ("/api/annotations", "/api/skip", "/api/flag"):
+                    response = public_client.request(method, path, json={
+                        "item_id": "src/secret#q0", "answerable": True, "code": "other", "kind": "bad_item"})
+                elif path.startswith("/api/auth/"):
+                    continue  # login/logout would end this session
+                elif path.startswith("/api/") and "{" not in path:
+                    response = public_client.request(method, path, json={})
+                else:
+                    continue
+                checked += 1
+                assert "TOP-SECRET-TEXT" not in response.text, (method, path)
+                assert "src/secret" not in response.text or response.status_code in (403, 404), (method, path)
+                if "{item_id" in path or path in ("/api/annotations", "/api/skip", "/api/flag"):
+                    assert response.status_code == 404, (method, path, response.status_code)
+        assert checked >= 10  # every /api route except auth; 13 today

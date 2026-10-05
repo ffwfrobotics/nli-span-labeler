@@ -194,6 +194,32 @@ class TestRejections:
         item = parse_row(row)[0]
         assert item.permissions == "jev" and item.visibility == "libre"
 
+    def test_explicit_libre_cannot_expose_restricted_text(self):
+        """Visibility is restricted if the source class or the row's own tier is restricted."""
+        row = dict(by_id("bbc_news/eval/73"), permissions="libre")  # bbc_news is unverified -> restricted
+        item = parse_row(row)[0]
+        assert item.permissions == "libre" and item.visibility == "restricted"
+        row = dict(by_id("fever/eval/5"), permissions="restricted")  # libre source, restricted by the row
+        assert parse_row(row)[0].visibility == "restricted"
+
+    def test_reimport_raises_tier_for_new_jev_output(self, db, tmp_path):
+        """Same state, newly attached Jev answers: the release tier rises (FR-56), audited."""
+        from e13_labeler.db import get_db
+
+        row = dict(by_id("snli/eval/12"))
+        first, second = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+        first.write_text(json.dumps(row) + "\n")
+        second.write_text(json.dumps(dict(row, model_answers={"jev": {"outdoors": {"noul": 0.9}}})) + "\n")
+        with get_db() as conn:
+            import_file(conn, first)
+            report = import_file(conn, second)
+            item = conn.execute("SELECT permissions, visibility, model_answers_json FROM items").fetchone()
+            log = conn.execute("SELECT action FROM audit_log WHERE action = 'raise_tier'").fetchall()
+            again = import_file(conn, second)
+        assert report.n_raised == 1 and report.n_items == 0
+        assert (item[0], item[1]) == ("jev", "libre") and "jev" in json.loads(item[2])
+        assert len(log) == 1 and again.n_raised == 0 and again.n_unchanged == 1
+
     @pytest.mark.parametrize("teacher", ["openjev", "JEV", "jev2", "clefflash", "decider"])
     def test_only_exact_jev_counts(self, teacher):
         """Owner decision 2026-10-05: an explicit list matched exactly; openjev is not Jev."""

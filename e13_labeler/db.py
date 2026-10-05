@@ -302,7 +302,14 @@ ALTER TABLE batch_items ADD COLUMN target INTEGER;
 ALTER TABLE locks ADD COLUMN batch_id INTEGER REFERENCES batches(id);
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5]
+# v6: the as-of date the labeler saw (stale_state reference, owner Q7), kept per
+# annotation; the lock remembers the date handed out so the submit stores that one.
+SCHEMA_V6 = """
+ALTER TABLE annotations ADD COLUMN asof TEXT;
+ALTER TABLE locks ADD COLUMN asof TEXT;
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6]
 
 
 def connect() -> sqlite3.Connection:

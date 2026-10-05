@@ -172,21 +172,37 @@ class TestRules:
             check(sub(answerable=True, spans=[Span(side="option", role="refute", text="x", option="true",
                                                     start=0, end=1)]))
 
-    def test_span_policy_and_override(self):
-        """FR-19: conflicting_evidence needs support + refute on one option; override is recorded."""
-        s = sub(reasons=["conflicting_evidence"])
-        with pytest.raises(PolicyViolation, match="same option"):
-            check(s)
-        s = sub(reasons=["conflicting_evidence"], override=True)
-        check(s)
-        assert s.policy_override is True
-        spans = [Span(side="state", role="support", text="330", start=H0, end=H1, option="true",
-                      reasons=["conflicting_evidence"]),
-                 Span(side="state", role="refute", text="1889", start=Y0, end=Y1, option="true",
-                      reasons=["conflicting_evidence"])]
+    def test_conflicting_evidence_is_a_hard_rule(self):
+        """Owner: support + refute on one option, always. Neither override nor batch policy relaxes it."""
+        for override in (False, True):
+            with pytest.raises(SubmissionError, match="same option") as e:
+                check(sub(reasons=["conflicting_evidence"], override=override))
+            assert not isinstance(e.value, PolicyViolation)
+        one_sided = [Span(side="state", role="support", text="330", start=H0, end=H1, option="true",
+                          reasons=["conflicting_evidence"])]
+        with pytest.raises(SubmissionError, match="same option"):
+            check(sub(reasons=["conflicting_evidence"], spans=one_sided, override=True),
+                  span_policy={"conflicting_evidence": "optional"})
+        spans = one_sided + [Span(side="state", role="refute", text="1889", start=Y0, end=Y1, option="true",
+                                  reasons=["conflicting_evidence"])]
         s = sub(reasons=["conflicting_evidence"], spans=spans, override=True)
         check(s)
         assert s.policy_override is False  # nothing was overridden
+
+    def test_stale_state_needs_its_span(self):
+        """Owner: the dated or time-sensitive phrase is required for stale_state."""
+        with pytest.raises(SubmissionError, match="dated"):
+            check(sub(reasons=["stale_state"], override=True), span_policy={"stale_state": "none"})
+        check(sub(reasons=["stale_state"], spans=[Span(side="state", role="support", text="1889", start=Y0,
+                                                       end=Y1, reasons=["stale_state"])]))
+
+    def test_soft_policy_override_is_recorded(self):
+        """FR-19 for the overridable reasons: blocked, then saved with the flag."""
+        with pytest.raises(PolicyViolation, match="needs at least one span"):
+            check(sub(reasons=["false_premise"]))
+        s = sub(reasons=["false_premise"], override=True)
+        check(s)
+        assert s.policy_override is True
 
     def test_policy_non_factual_support(self):
         with pytest.raises(PolicyViolation, match="framing"):
@@ -327,13 +343,48 @@ class TestSubmit:
         assert response.json()["detail"]["policy"] is False
 
     def test_policy_block_then_override(self, pilot, owner_client: TestClient):
-        """FR-19: blocked, then saved with the override flag."""
+        """FR-19: blocked, then saved with the override flag; hard rules stay blocked."""
         only_item("fever/eval/5#tall")
         item_id = owner_client.get("/api/next").json()["item_id"]
-        response = submit(owner_client, item_id, reasons=["conflicting_evidence"])
-        assert response.status_code == 422 and response.json()["detail"]["policy"] is True
         response = submit(owner_client, item_id, reasons=["conflicting_evidence"], policy_override=True)
+        assert response.status_code == 422 and response.json()["detail"]["policy"] is False
+        response = submit(owner_client, item_id, reasons=["false_premise"])
+        assert response.status_code == 422 and response.json()["detail"]["policy"] is True
+        response = submit(owner_client, item_id, reasons=["false_premise"], policy_override=True)
         assert response.status_code == 200 and response.json()["policy_override"] is True
+
+    def test_asof_is_stored_with_the_annotation(self, pilot, owner_client: TestClient):
+        """The as-of date the labeler saw is kept per annotation (owner Q7)."""
+        from e13_labeler.db import get_db
+
+        only_item(f"{ALERT}#severity")
+        payload = owner_client.get("/api/next").json()
+        with get_db() as conn:  # the generator's date stays what was shown, even if the item changes later
+            conn.execute("UPDATE items SET e13_json = NULL")
+        assert submit(owner_client, payload["item_id"], answerable=True).status_code == 200
+        with get_db() as conn:
+            assert conn.execute("SELECT asof FROM annotations").fetchone()[0] == payload["asof"] == "2026-10-05"
+
+    def test_inactive_accounts_cannot_label(self, pilot, fresh_client: TestClient):
+        """Paused, onboarding and invited accounts are refused on every labelling endpoint."""
+        from e13_labeler.db import get_db
+
+        only_item(BBC)
+        labeler = make_labeler("p", clearance="internal")
+        login(fresh_client, "p")
+        item_id = fresh_client.get("/api/next").json()["item_id"]
+        for status in ("paused", "onboarding", "invited"):
+            with get_db() as conn:
+                conn.execute("UPDATE labelers SET status = ? WHERE id = ?", (status, labeler["id"]))
+            assert fresh_client.get("/api/next").status_code == 403
+            assert submit(fresh_client, item_id, answerable=True).status_code == 403
+            assert fresh_client.post("/api/skip", json={"item_id": item_id, "code": "other"}).status_code == 403
+            assert fresh_client.post("/api/flag", json={"item_id": item_id, "kind": "bad_item"}).status_code == 403
+            assert fresh_client.get("/api/me").status_code == 200  # can still see their own status
+
+    def test_labelers_see_a_neutral_batch_name(self, pilot, public_client: TestClient):
+        progress = public_client.get("/api/next").json()["progress"]
+        assert progress["batch"].startswith("batch ") and "pilot" not in progress["batch"]
 
     def test_cannot_label_twice(self, pilot, owner_client: TestClient):
         only_item("fever/eval/5#tall")

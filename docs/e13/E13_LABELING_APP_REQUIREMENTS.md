@@ -31,8 +31,9 @@
 >    reference: `e13.asof` when set, otherwise today. Labelers ask whether the information *could* have changed,
 >    never whether it did (no world knowledge); the dated or time-sensitive phrase is the required span.
 >    `false_premise` is judged against the state only. The app shows every item's as-of date, so generated items
->    don't stand out.
-> 5. **Overlap (§11 Q10, FR-31, FR-32):** "3 is ideal, but we might have to make 1 work." `overlap_target` is
+>    don't stand out, and stores the date shown with each annotation. `conflicting_evidence` and `stale_state` span
+>    rules are hard: neither a batch's span policy nor the Shift+Enter override relaxes them.
+> 5. **Overlap (§11 Q10, FR-31, FR-32), from the owner directly in the app session:** "3 is ideal, but we might have to make 1 work." `overlap_target` is
 >    1..n, default 3 (this replaces "default 2, minimum 2"). With overlap 1, agreement comes from (a) a deterministic
 >    **reliability subset** (`reliability_fraction` of items labelled by `reliability_overlap` ≥ 2 people), (b) a
 >    **re-label batch** (`relabel_of`): the same labeler labels a sample of their own items again, blind, after
@@ -242,10 +243,10 @@ Each requirement is testable. "Test" names the acceptance check.
   The stored `text` must equal the slice. Test: for every stored span, `state[start:end] == text` (or the pointer target's slice).
 - **FR-18 (MUST)** Selections snap to word boundaries by default. E07 found that annotators mark single words and that word units beat phrases (`e07_dspy_evidence/REPORT.md` finding 2). Holding `Alt` while selecting gives character precision. Test: dragging across "playi|ng a gui|tar" stores "playing a guitar".
 - **FR-19 (SHOULD)** Per-batch span policy per reason: `required` | `optional` | `none`. Proposed defaults:
-  - `conflicting_evidence`: required, with ≥1 support and ≥1 refute on the same option;
+  - `conflicting_evidence`: required, with ≥1 support and ≥1 refute on the same option. *Owner decision 2026-10-05: a hard rule that no batch policy or override relaxes;*
   - `non_factual_support`: required, with ≥1 framing and ≥1 support;
-  - `stale_state`: required (the dated or time-sensitive phrase);
-  - `false_premise`: required (the refuting span), or none when the premise is false against world knowledge (§11 Q8);
+  - `stale_state`: required (the dated or time-sensitive phrase). *Hard rule, as for `conflicting_evidence`;*
+  - `false_premise`: required (the refuting span). *Owner decision 2026-10-05 (§11 Q8): judged against the state only, so there is no world-knowledge case;*
   - `unrelated`: none;
   - all others: optional.
 
@@ -283,7 +284,7 @@ Each requirement is testable. "Test" names the acceptance check.
 
 ### 4.5 Batches, queues and assignment
 
-- **FR-31 (MUST)** A batch is a named set of items with: `task_type`, `reason_set` (FR-33), `overlap_target` (default 2, minimum 2), `tier_ceiling`, the span policy (FR-19), `show_model_answer` (default false), `priority` and a status of `draft`/`open`/`closed`. Test: a batch can't open with `overlap_target < 2`.
+- **FR-31 (MUST)** A batch is a named set of items with: `task_type`, `reason_set` (FR-33), `overlap_target` (*owner decision 2026-10-05: default 3, minimum 1*; plus an optional reliability subset and re-label batches, see the decisions block), `tier_ceiling`, the span policy (FR-19), `show_model_answer` (default false), `priority` and a status of `draft`/`open`/`closed`. Test: `overlap_target < 1` is rejected; overlap 1..3 each yield exactly that many labels per item.
 - **FR-32 (MUST)** `GET /api/next` picks an item where all of these hold:
   - the batch is open;
   - the item's tier ≤ the labeler's clearance (FR-50);

@@ -131,6 +131,28 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [x] `.gitignore` covers `outputs/` and the DB files. Test fixtures can be committed (the blanket `*.jsonl` ignore is gone) **[eval #10]**.
 - [x] Reproducible environment: `uv.lock` replaces the stale `.uv-freeze.txt` **[eval #7]**.
 
+## Review of b18fbb6 (2026-10-05)
+
+Fixed in this round:
+- [x] §3.1 `conflicting_evidence` (support + refute on one option) and `stale_state` (the dated phrase) are hard span rules: no batch policy or Shift+Enter relaxes them (`reasons.HARD_SPAN_RULES`).
+- [x] §3.2 Visibility is restricted if the source class **or** the row's explicit tier is restricted, so `"permissions": "libre"` can't expose restricted text.
+- [x] §3.3 A re-import with an unchanged state still raises the tier when Jev output is newly attached (`n_raised`, audited `raise_tier`).
+- [x] §3.4 Each annotation stores the as-of date it was shown (schema v6: `annotations.asof`, carried on the lock).
+- [x] §3.6 Requirements body: FR-19 (`false_premise` against the state only; the hard rules) and FR-31 (minimum 1, default 3) updated.
+- [x] §3.7 Labelers no longer see who holds a lock or the batch's real name (`batch <id>`); admins still do.
+- [x] §5 A Host allowlist (`ALLOWED_HOSTS`; loopback names only in SINGLE_USER) blocks DNS rebinding.
+- [x] §5 Cookies are `Secure` by default outside SINGLE_USER (`COOKIE_SECURE=0` to opt out, with a warning).
+- [x] §5 `serve` turns off uvicorn's proxy headers; `TRUSTED_PROXIES` is the only proxy trust.
+- [x] §5 Only active accounts may label, skip, flag or extend locks.
+- [x] §5 `data/` is ignored again.
+- [x] §8 A tier fuzz test covers every `/api` route with a public session (FR-57).
+
+Still open from the review:
+- [ ] §3.5 The `show_model_answer` Jev exception is enforced in `next` and submit (via `_batch_filter`). History and export must use the same filter when they land (FR-21, FR-45).
+- [ ] §2 Finish M1: FR-29 gold CRUD, FR-9 model pseudo-labelers, FR-37 wiring to the DB (blind batches, gold excluded), FR-45/46/48/49 exports, dashboard table.
+- [ ] §8 FR-3 render tests (needs a browser test harness) and the FR-5 export round trip (with FR-45).
+- [ ] §5 CSRF tokens (M2; SameSite=Strict plus JSON-only bodies mitigate this meanwhile).
+
 ## Schema drift to watch (from `docs/e13/fixtures/README.md`, "Hedging")
 
 - [ ] The row schema isn't frozen (A2.1 / D8). Relation, reason and evidence fields may move, so re-check §5.4/§5.5 before building the exports.

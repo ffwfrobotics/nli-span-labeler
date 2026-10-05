@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 # Set test environment before importing the app
 os.environ["RATE_LIMIT_ENABLED"] = "0"  # Disable rate limiting in tests
+os.environ["COOKIE_SECURE"] = "0"  # the test client speaks plain HTTP; the default is covered in test_auth
 os.environ.pop("SINGLE_USER", None)
 
 OWNER_PASSWORD = "owner-pass-123"

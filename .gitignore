@@ -1,5 +1,7 @@
 # Runtime data: database, backups, exports (requirements FR-49, NFR-6)
 outputs/
+# Local datasets (pool files and legacy NLI downloads); fixtures live in docs/e13/fixtures/
+data/
 *.db
 *.db-journal
 *.db-wal

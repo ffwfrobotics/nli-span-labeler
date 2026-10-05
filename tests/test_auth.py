@@ -13,6 +13,17 @@ class TestLogin:
         assert data["labeler"]["pseudonym"] == owner["pseudonym"]
         assert data["labeler"]["role"] == "owner"
 
+    def test_cookie_secure_by_default(self, owner, fresh_client: TestClient, monkeypatch):
+        """NFR-5: Secure unless SINGLE_USER, or explicitly COOKIE_SECURE=0."""
+        from e13_labeler import config
+
+        monkeypatch.delenv("COOKIE_SECURE")
+        assert config.cookie_secure() is True
+        response = fresh_client.post("/api/auth/login", json={"login_name": "owner", "password": OWNER_PASSWORD})
+        assert "secure" in response.headers["set-cookie"].lower()
+        monkeypatch.setenv("SINGLE_USER", "1")
+        assert config.cookie_secure() is False
+
     def test_login_cookie_flags(self, owner, fresh_client: TestClient):
         """NFR-5: HttpOnly and SameSite=Strict."""
         response = fresh_client.post("/api/auth/login", json={"login_name": "owner", "password": OWNER_PASSWORD})
@@ -103,9 +114,27 @@ class TestSingleUser:
         monkeypatch.setenv("SINGLE_USER", "1")
         from e13_labeler.app import app
 
-        with TestClient(app, client=("127.0.0.1", 50000)) as client:
+        with TestClient(app, client=("127.0.0.1", 50000), base_url="http://127.0.0.1") as client:
             me = client.get("/api/me").json()
         assert me["role"] == "owner" and me["single_user"] is True
+
+    def test_dns_rebinding_host_refused(self, owner, monkeypatch):
+        """A page on evil.example resolving to 127.0.0.1 must not reach the auto-logged-in owner."""
+        monkeypatch.setenv("SINGLE_USER", "1")
+        from e13_labeler.app import app
+
+        with TestClient(app, client=("127.0.0.1", 50000), base_url="http://evil.example") as client:
+            assert client.get("/api/me").status_code == 400
+        with TestClient(app, client=("127.0.0.1", 50000), base_url="http://localhost:8000") as client:
+            assert client.get("/api/me").status_code == 200
+
+    def test_allowed_hosts_config(self, owner, monkeypatch, fresh_client):
+        monkeypatch.setenv("ALLOWED_HOSTS", "labels.example.org")
+        assert fresh_client.get("/api/auth/status").status_code == 400
+        from e13_labeler.app import app
+
+        with TestClient(app, base_url="https://labels.example.org") as client:
+            assert client.get("/api/auth/status").status_code == 200
 
     def test_non_loopback_refused(self, owner, monkeypatch):
         """FR-54: requests from a non-loopback address are refused."""
@@ -115,6 +144,17 @@ class TestSingleUser:
         with TestClient(app, client=("192.168.1.50", 50000)) as client:
             assert client.get("/api/me").status_code == 403
             assert client.get("/").status_code == 403
+
+    def test_serve_disables_uvicorn_proxy_headers(self, monkeypatch):
+        """Proxy trust is ours alone; uvicorn would otherwise trust X-Forwarded-For from 127.0.0.1."""
+        import uvicorn
+
+        from e13_labeler.__main__ import main
+
+        seen = {}
+        monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: seen.update(kw))
+        main(["serve"])
+        assert seen["proxy_headers"] is False and seen["forwarded_allow_ips"] == ""
 
     def test_forwarded_header_not_trusted(self, owner, monkeypatch):
         """A spoofed X-Forwarded-For can't make a remote client look local (or dodge rate limits)."""
