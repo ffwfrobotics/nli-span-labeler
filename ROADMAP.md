@@ -51,9 +51,9 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 
 ### Agreement and export
 - [ ] **FR-9** Import model pseudo-labelers (§5.4 JSONL, `labeler_kind: "model"`).
-- [ ] **FR-37** Per-reason Krippendorff's α (nominal, binary), with n, pairable values, prevalence and a 95% bootstrap CI.
-- [ ] **FR-38** (first bullet) α for "any abstain".
-- [ ] **FR-40** One shared α module, tested against the `krippendorff` package (already a dev dependency).
+- [~] **FR-37** Per-reason Krippendorff's α (nominal, binary), with n, pairable values, prevalence and a 95% bootstrap CI. Done in `agreement.py`; still needed: wiring to the DB (blind batches only, gold excluded).
+- [x] **FR-38** (first bullet) α for "any abstain" (`agreement.any_abstain_units`).
+- [x] **FR-40** One shared α module (`e13_labeler/agreement.py`, stdlib only), tested against the `krippendorff` package and Krippendorff's 2011 worked example.
 - [ ] Simple dashboard table (§6.4 subset).
 - [ ] **FR-45** Annotation export (§5.4) and its JSON Schema.
 - [ ] **FR-46** Training export (§5.5).
@@ -100,7 +100,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 ### Agreement, adjudication (§4.6)
 - [ ] **FR-39** Span token-F1/Jaccard per role and per reason; E07 AP with ≥ 3 labelers.
 - [ ] **FR-41** Full dashboard: candidates vs the min/median of established reasons, confusion matrix, per-labeler gold accuracy.
-- [ ] **FR-42** "α unstable" warning (< 30 positives or < 3% prevalence).
+- [~] **FR-42** "α unstable" warning (< 30 positives or < 3% prevalence). Computed in `agreement.describe`; still needed: show it on the dashboard.
 - [ ] **FR-43** Adjudication queue, anonymised L-a/L-b, stored separately from raw labels.
 - [~] **FR-44** Flags. Done: API and admin list. Still needed: the `f` key on the labelling screen, resolving flags.
 - [ ] §7.3 monitoring: flag median active time < 5 s and reason prevalence above 3× the batch rate.
