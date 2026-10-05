@@ -23,7 +23,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 ## M1: MVP, owner only
 
 ### Import (§4.1)
-- [~] **FR-1** Import E09 pool JSONL (`importer.py`). Tested on synthetic rows. The real-sample tests (`tests/test_import_pool.py`, including "first 100 rows, 0 rejected") are written but skip until `docs/e13/fixtures/pool_eval_libre_sample.jsonl` is committed: the upstream commit lost it to the legacy `*.jsonl` ignore rule.
+- [x] **FR-1** Import E09 pool JSONL (`importer.py`). The real libre sample (`docs/e13/fixtures/pool_eval_libre_sample.jsonl`, 384 rows → 695 items) imports with 0 rejects; `tests/test_import_pool.py` covers it, including "first 100 rows".
 - [x] **FR-2** One item per (row, qid); `item_id = "<row id>#<qid>"`. Row ids containing `#` are rejected.
 - [~] **FR-3** Render `choice` / `score` / `noul` questions per `docs/e13/fixtures/README.md`: noul default texts, `_` → space for slug keys, sentence keys selectable, qid fallback, pretty JSON. Done in `label.js`; still needed: an automated render test per case.
 - [x] **FR-4** Detect the state format (`json` when the state is, or parses to, an object or array); `state_format` overrides.
@@ -43,11 +43,11 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [x] **FR-15** Span roles support/refute/unsupported/framing, with side validation. The API and UI are done.
 - [x] **FR-16** Spans link to an option and to checked reasons. The API and UI are done.
 - [x] **FR-17** Coordinates: char offsets, RFC 6901 pointer + offsets, option-side offsets; `text == slice`. Validated server-side; produced by the UI.
-- [~] **FR-18** Word-snapped selection, Alt for character precision, plus the keyboard path (←/→, Shift extends). Still needed: highlight the exact characters of a char-precise span; the whole touched words light up now.
+- [~] **FR-18** Word-snapped selection, Alt for character precision, plus the keyboard path (←/→, Shift extends). Still needed: highlight the exact characters of a char-precise span; the whole touched words light up now. Offsets are code points (as Python slices), not JS UTF-16 units; checked with emoji and `\r\n` in Chromium.
 - [x] **FR-19** Span policy per reason; block submit; `Shift+Enter` override, recorded.
 - [x] **FR-20** Skip with a reason code (`x` then `1`…`5`); never re-served to that labeler.
 - [~] **FR-22** Active time (visible tab + interaction in the last 60 s) and wall time from lock hand-out. Both are done; still needed: an automated "hidden tab for 5 min adds < 1 s" browser test.
-- [x] §6.1 labelling screen and §6.2 keyboard map (`static/label.js`). It fits 1366×768; checked in Chromium with `tests/e2e/label_smoke.js`.
+- [x] §6.1 labelling screen and §6.2 keyboard map (`static/label.js`). It fits 1366×768; checked in Chromium with `tests/e2e/label_smoke.js`. All 695 real sample items render with no JS errors and no horizontal scroll.
 - [x] Span rendering: colour **and** underline style per role (§6.1, NFR-9).
 
 ### Agreement and export
@@ -125,7 +125,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [x] **NFR-3** No CDN or build step. Tested.
 - [~] **NFR-8** Tests run offline **[eval #6]**. Still needed: tests for every MUST FR, a blindness test, a tier fuzz test and the assignment property test. The α reference test is done.
 - [x] **NFR-4** Pseudonyms (`L01`, …); contact details only in the owner-only `identity` table.
-- [ ] **NFR-1** `next`/submit p95 < 200 ms with 50k items and 10 labelers. Avoid the old `ORDER BY RANDOM()` full scans.
+- [~] **NFR-1** `next`/submit p95 < 200 ms with 50k items and 10 labelers. Schema v3 indexes `annotations(item_id, …)`; a full queue pass over the 695-item sample went from 49 s to 13 s. Still needed: a 50k-item benchmark, and replacing `ORDER BY RANDOM()` full scans.
 - [ ] **NFR-2** Answerable item in one keystroke plus Enter; median ≤ 20 s (measure in the pilot).
 - [ ] **NFR-9** Visible focus everywhere; roles distinguishable without colour.
 - [x] `.gitignore` covers `outputs/` and the DB files. Test fixtures can be committed (the blanket `*.jsonl` ignore is gone) **[eval #10]**.
@@ -142,5 +142,5 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [ ] Q3: final reason list (`out_of_scope`?). It fixes the key map.
 - [ ] Q7: the reference time for `stale_state`. It decides whether `e13.asof` is shown to labelers.
 - [ ] Q2: the keep rule; Q8: `false_premise` scope; Q9: the boundary order for ambiguous/underspecified/subjective; Q10: overlap of 2 or 3.
-- [~] Import sample: `feature/e13-test-fixtures` is merged (README, SOURCES, builder), but **the JSONL is missing**. Re-add it with `git add -f`, or after merging this branch's `.gitignore`.
+- [x] Import sample: `feature/e13-test-fixtures`, merged with its JSONL (sha256 matches the README).
 - [ ] Which teachers count as Jev (FR-8)? Currently `jev*` plus `E13_JEV_TEACHERS`. A Jev answer to any question raises **every** item of that row, since the output came from the shared state. Confirm that this conservative reading is wanted.

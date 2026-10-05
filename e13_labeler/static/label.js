@@ -94,7 +94,7 @@ function renderItem(item) {
     } else {
         view.className = 'state-text';
         view.innerHTML = tokenize(item.state, container({ side: 'state', pointer: null, text: item.state }));
-        document.getElementById('state-meta').textContent = `text ${item.state.length.toLocaleString()}c`;
+        document.getElementById('state-meta').textContent = `text ${cpLength(item.state).toLocaleString()}c`;
     }
     document.getElementById('state-pane').scrollTop = 0;
 
@@ -112,16 +112,33 @@ function container(info) {
 
 // Words, punctuation and whitespace each get a span carrying their offsets, so a
 // DOM selection maps back to exact character positions in the original string.
+// Offsets count Unicode code points, as the server (Python) does, not the UTF-16
+// units JS strings index by, so text with emoji or other astral characters
+// still lines up.
 function tokenize(text, cid) {
     const re = /(\s+)|([\p{L}\p{N}_]+(?:['’][\p{L}\p{N}_]+)*)|([^\s\p{L}\p{N}_])/gu;
     let html = '';
     let m;
+    let cp = 0;
     while ((m = re.exec(text)) !== null) {
         const kind = m[1] ? 'ws' : (m[2] ? 'w' : 'p');
-        const s = m.index, e = m.index + m[0].length;
-        html += `<span class="tok ${kind}" data-c="${cid}" data-s="${s}" data-e="${e}">${escapeHtml(m[0])}</span>`;
+        const len = cpLength(m[0]);
+        html += `<span class="tok ${kind}" data-c="${cid}" data-s="${cp}" data-e="${cp + len}">${escapeHtml(m[0])}</span>`;
+        cp += len;
     }
     return html;
+}
+
+function cpLength(str) {
+    let n = 0;
+    for (const _ of str) n++;
+    return n;
+}
+
+function codePoints(cid) {
+    const c = containers[cid];
+    if (!c.cps) c.cps = Array.from(c.text);
+    return c.cps;
 }
 
 function escapePointerToken(key) {
@@ -130,7 +147,7 @@ function escapePointerToken(key) {
 
 function bareToken(text, cls, info) {
     const cid = container({ ...info, text, bare: true });
-    return `<span class="tok w ${cls}" data-c="${cid}" data-s="0" data-e="${text.length}">${escapeHtml(text)}</span>`;
+    return `<span class="tok w ${cls}" data-c="${cid}" data-s="0" data-e="${cpLength(text)}">${escapeHtml(text)}</span>`;
 }
 
 // JSON states are pretty-printed for reading; every span is still stored as a
@@ -374,18 +391,20 @@ function selectionFromRange(startTok, startOffset, endTok, endOffset, precise) {
     }
     let start, end;
     if (precise) {
-        start = +startTok.dataset.s + startOffset;
-        end = +endTok.dataset.s + endOffset;
+        // DOM offsets are UTF-16 units inside the token; convert to code points
+        start = +startTok.dataset.s + cpLength(startTok.textContent.slice(0, startOffset));
+        end = +endTok.dataset.s + cpLength(endTok.textContent.slice(0, endOffset));
     } else {
         // Snap outward to whole words: "playi|ng a gui|tar" -> "playing a guitar"
         start = +startTok.dataset.s;
         end = +endTok.dataset.e;
     }
-    const text = info.text;
-    while (start < end && /\s/.test(text[start])) start++;
-    while (end > start && /\s/.test(text[end - 1])) end--;
+    const cps = codePoints(cid);
+    while (start < end && /\s/.test(cps[start])) start++;
+    while (end > start && /\s/.test(cps[end - 1])) end--;
     if (start >= end) return null;
-    return { cid, side: info.side, pointer: info.pointer ?? null, option: info.option, start, end, text: text.slice(start, end) };
+    return { cid, side: info.side, pointer: info.pointer ?? null, option: info.option, start, end,
+             text: cps.slice(start, end).join('') };
 }
 
 function tokenOfNode(node) {

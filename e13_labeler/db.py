@@ -213,7 +213,14 @@ ALTER TABLE batches ADD COLUMN require_note INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE locks ADD COLUMN served_at TEXT;
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2]
+# v3: the queue's per-item label counts and "labelled by me" checks (FR-32, NFR-1)
+SCHEMA_V3 = """
+CREATE INDEX idx_annotations_item_batch ON annotations(item_id, batch_id);
+CREATE INDEX idx_annotations_item_labeler ON annotations(item_id, labeler_id);
+CREATE INDEX idx_locks_labeler ON locks(labeler_id);
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3]
 
 
 def connect() -> sqlite3.Connection:

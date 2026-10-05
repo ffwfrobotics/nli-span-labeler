@@ -124,6 +124,17 @@ class TestRules:
         with pytest.raises(SubmissionError, match="start and end"):
             check(sub(answerable=True, spans=[Span(side="state", role="support", text="1889", start=26)]))
 
+    def test_offsets_count_code_points(self):
+        """Offsets are code points, as Python slices them, not UTF-16 units (emoji are 2 in JS)."""
+        state = "Party 🎉🎉 time:\r\nthe café opens at 9 😀 sharp."
+        start = state.index("sharp")
+        assert start == 38  # in UTF-16 units (JS string indices) it would be 41: three emoji precede it
+        check(sub(answerable=True, spans=[Span(side="state", role="support", text="sharp", start=start, end=start + 5)]),
+              state=state)
+        with pytest.raises(SubmissionError, match="not the slice"):
+            check(sub(answerable=True, spans=[Span(side="state", role="support", text="sharp", start=41, end=46)]),
+                  state=state)
+
     def test_json_pointer_spans(self):
         """FR-17 for JSON states: pointer + offsets in a string value, or a bare pointer."""
         state = json.dumps({"alert": {"evidence": "84 failed attempts", "count": 84, "tags": ["a"]}})
