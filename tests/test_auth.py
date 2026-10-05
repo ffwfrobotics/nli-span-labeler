@@ -39,10 +39,13 @@ class TestLogin:
         response = fresh_client.post("/api/auth/login", json={"login_name": "ghost", "password": "x"})
         assert response.status_code == 401
 
-    def test_no_registration_endpoint(self, fresh_client: TestClient):
-        """FR-51: self-registration is off."""
-        response = fresh_client.post("/api/auth/register", json={"login_name": "x", "password": "y"})
-        assert response.status_code in (404, 405)
+    def test_register_without_token_is_403(self, fresh_client: TestClient):
+        """FR-51: self-registration is off; registering needs an invite."""
+        response = fresh_client.post("/api/auth/register", json={"login_name": "xyz", "password": "y" * 12})
+        assert response.status_code == 403
+        response = fresh_client.post("/api/auth/register",
+                                     json={"token": "made-up", "login_name": "xyz", "password": "y" * 12})
+        assert response.status_code == 403
         assert fresh_client.get("/api/auth/status").json()["registration_enabled"] is False
 
 

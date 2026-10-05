@@ -47,17 +47,35 @@ def fresh_client(db) -> Generator[TestClient, None, None]:
         yield c
 
 
-def make_labeler(login: str, clearance: str = "public", role: str = "labeler") -> dict:
+def make_labeler(login: str, clearance: str = "public", role: str = "labeler", status: str = "active",
+                 agreed: bool = True) -> dict:
+    """An account past onboarding by default: active, contributor agreement accepted."""
+    from e13_labeler import contributor
     from e13_labeler.auth import create_labeler
     from e13_labeler.db import get_db
 
     with get_db() as conn:
-        return create_labeler(conn, login, LABELER_PASSWORD, role=role, clearance=clearance, status="active")
+        labeler = create_labeler(conn, login, LABELER_PASSWORD, role=role, clearance=clearance, status=status)
+        if agreed:
+            conn.execute("UPDATE labelers SET agreement_version = ? WHERE id = ?",
+                         (contributor.VERSION, labeler["id"]))
+        return labeler
+
+
+def use_csrf(client: TestClient) -> TestClient:
+    """Echo the CSRF cookie in X-CSRF-Token on every request, as app.js does (NFR-5)."""
+    if "e13_csrf" not in client.cookies:
+        client.get("/api/me")
+    token = client.cookies.get("e13_csrf")
+    if token:
+        client.headers["X-CSRF-Token"] = token
+    return client
 
 
 def login(client: TestClient, login_name: str, password: str = LABELER_PASSWORD):
     response = client.post("/api/auth/login", json={"login_name": login_name, "password": password})
     assert response.status_code == 200, response.text
+    use_csrf(client)
     return response.json()
 
 

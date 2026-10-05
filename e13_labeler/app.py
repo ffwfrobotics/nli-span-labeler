@@ -27,13 +27,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from . import __version__, config
 from .auth import (
+    CSRF_COOKIE,
     client_ip,
     create_session,
+    csrf_ok,
+    csrf_token,
+    needs_agreement,
     delete_session,
     get_current_labeler,
     get_labeler_from_session,
@@ -60,13 +64,9 @@ from .labelling import (
 from .reasons import CANDIDATES, DEFINITIONS, HARD_SPAN_RULES, REASONS, SKIP_CODES
 from .importer import is_jev
 from .tiers import tiers_within, visible_to
+from .api_accounts import router as accounts_router, set_session_cookies
 
-# Initialize rate limiter with the proxy-aware key function
-limiter = Limiter(
-    key_func=client_ip,
-    enabled=config.RATE_LIMIT_ENABLED,
-    default_limits=[config.RATE_LIMIT_DEFAULT],
-)
+from .ratelimit import limiter
 
 # ============================================================================
 # API Documentation
@@ -123,6 +123,7 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+app.include_router(accounts_router)
 app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")
 
 
@@ -157,6 +158,21 @@ async def single_user_guard(request: Request, call_next):
     """FR-54: in SINGLE_USER mode, refuse every request that isn't from loopback."""
     if config.single_user() and not is_loopback(request):
         return JSONResponse({"detail": "SINGLE_USER mode serves loopback only"}, status_code=403)
+    return await call_next(request)
+
+
+CSRF_EXEMPT = {"/api/auth/login", "/api/auth/register", "/api/auth/reset"}
+
+
+@app.middleware("http")
+async def csrf_check(request: Request, call_next):
+    """
+    NFR-5: mutating API requests must echo the CSRF token (cookie e13_csrf) in
+    X-CSRF-Token. Login, registration and reset carry no session to abuse.
+    """
+    if (request.method in ("POST", "PUT", "PATCH", "DELETE") and request.url.path.startswith("/api/")
+            and request.url.path not in CSRF_EXEMPT and not csrf_ok(request)):
+        return JSONResponse({"detail": "CSRF token missing or invalid; reload the page"}, status_code=403)
     return await call_next(request)
 
 
@@ -200,6 +216,9 @@ class LabelerResponse(BaseModel):
     role: str
     clearance: str
     status: str
+    pause_reason: Optional[str] = None
+    agreement_version: Optional[str] = None
+    needs_agreement: bool = False
     single_user: bool = False
 
 
@@ -324,15 +343,7 @@ async def login(request: Request, credentials: LabelerLogin, response: Response)
             raise HTTPException(403, "This account has been revoked")
         audit(conn, row["id"], "login", row["pseudonym"], {"ip": client_ip(request)})
 
-    token = create_session(row["id"])
-    response.set_cookie(
-        key=config.SESSION_COOKIE,
-        value=token,
-        httponly=True,
-        secure=config.cookie_secure(),
-        samesite="strict",
-        max_age=config.SESSION_EXPIRY_DAYS * 24 * 60 * 60,
-    )
+    set_session_cookies(response, create_session(row["id"]))
     return {"status": "logged_in", "labeler": labeler_dict(row)}
 
 
@@ -343,18 +354,23 @@ async def logout(request: Request, response: Response):
     if token:
         delete_session(token)
     response.delete_cookie(config.SESSION_COOKIE)
+    response.delete_cookie(CSRF_COOKIE)
     return {"status": "logged_out"}
 
 
 @app.get("/api/me", tags=["Authentication"], summary="Current labeler", response_model=LabelerResponse)
-async def get_me(labeler: dict = Depends(get_current_labeler)):
-    return LabelerResponse(**labeler, single_user=config.single_user())
+async def get_me(request: Request, response: Response, labeler: dict = Depends(get_current_labeler)):
+    # (Re)issue the CSRF cookie: SINGLE_USER mode has no login to set it
+    response.set_cookie(CSRF_COOKIE, csrf_token(request.cookies.get(config.SESSION_COOKIE)), httponly=False,
+                        secure=config.cookie_secure(), samesite="strict")
+    return LabelerResponse(**labeler, needs_agreement=needs_agreement(labeler), single_user=config.single_user())
 
 
 @app.get("/api/auth/status", tags=["Authentication"], summary="Auth mode")
 async def auth_status():
-    """Whether the server runs in SINGLE_USER mode. Self-registration is always off (FR-51)."""
-    return {"single_user": config.single_user(), "registration_enabled": False, "version": __version__}
+    """Whether the server runs in SINGLE_USER mode. Registration needs an invite (FR-51)."""
+    return {"single_user": config.single_user(), "registration_enabled": False, "invite_only": True,
+            "version": __version__}
 
 
 @app.get("/api/reasons", tags=["Annotation"], summary="Reason definitions")
@@ -370,15 +386,21 @@ async def reason_definitions():
 
 @app.get("/api/admin/labelers", tags=["Admin"], summary="List labelers")
 async def list_labelers(admin: dict = Depends(require_admin)):
-    """All accounts, human and model, by pseudonym. Contact details are never included."""
+    """All accounts, human and model, by pseudonym, with stats (FR-52). Contact details are never included."""
+    from .accounts import labeler_stats
+    from .quality import gold_accuracy
+
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM labelers ORDER BY id").fetchall()
-        return {
-            "labelers": [
-                {**labeler_dict(r), "kind": r["kind"], "created_at": r["created_at"], "last_seen": r["last_seen"]}
-                for r in rows
-            ]
-        }
+        out = []
+        for r in rows:
+            entry = {**labeler_dict(r), "kind": r["kind"], "created_at": r["created_at"], "last_seen": r["last_seen"]}
+            if r["kind"] == "human":
+                gold = gold_accuracy(conn, r["id"])
+                entry.update(labeler_stats(conn, r["id"]), gold_accuracy=gold["accuracy"],
+                             gold_rolling=gold["rolling"], gold_below_threshold=gold["below_threshold"])
+            out.append(entry)
+        return {"labelers": out}
 
 
 # ============================================================================

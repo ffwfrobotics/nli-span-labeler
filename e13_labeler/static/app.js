@@ -39,10 +39,16 @@ const SHORTCUTS = [
 // Authentication
 // ============================================================================
 
+const urlParams = new URLSearchParams(location.search);
+
 async function checkAuthStatus() {
     try {
         const status = await (await fetch('/api/auth/status')).json();
         singleUser = status.single_user;
+        if (urlParams.get('invite') || urlParams.get('reset')) {
+            showLinkForm();
+            return false;
+        }
 
         const meResp = await fetch('/api/me');
         if (!meResp.ok) {
@@ -94,9 +100,94 @@ async function handleLogin(event) {
     }
 }
 
+// Invite and reset links (FR-51, FR-52): /?invite=TOKEN or /?reset=TOKEN
+function showLinkForm() {
+    const reset = !!urlParams.get('reset');
+    document.getElementById('login-form').classList.add('hidden');
+    document.getElementById(reset ? 'reset-form' : 'register-form').classList.remove('hidden');
+    showAuthModal();
+}
+
+function leaveLinkForm() {
+    history.replaceState(null, '', '/');
+    urlParams.delete('invite');
+    urlParams.delete('reset');
+    document.getElementById('register-form').classList.add('hidden');
+    document.getElementById('reset-form').classList.add('hidden');
+    document.getElementById('login-form').classList.remove('hidden');
+}
+
+async function postLinkForm(url, body, errorId) {
+    const errorEl = document.getElementById(errorId);
+    const resp = await fetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+        const err = await resp.json();
+        errorEl.textContent = typeof err.detail === 'string' ? err.detail : 'Something went wrong';
+        errorEl.classList.remove('hidden');
+        return false;
+    }
+    errorEl.classList.add('hidden');
+    return true;
+}
+
+async function handleRegister(event) {
+    event.preventDefault();
+    const ok = await postLinkForm('/api/auth/register', {
+        token: urlParams.get('invite'),
+        login_name: document.getElementById('register-name').value,
+        password: document.getElementById('register-password').value,
+    }, 'register-error');
+    if (!ok) return;
+    leaveLinkForm();
+    if (await checkAuthStatus()) initializeApp();
+}
+
+async function handleReset(event) {
+    event.preventDefault();
+    const ok = await postLinkForm('/api/auth/reset', {
+        token: urlParams.get('reset'), password: document.getElementById('reset-password').value,
+    }, 'reset-error');
+    if (!ok) return;
+    leaveLinkForm();
+    showMessage('Password set. Log in with it.', 'success');
+}
+
+// Contributor agreement (FR-60)
+function renderMarkdown(text) {
+    // The agreement and guideline are our own text: headings, bold, lists, paragraphs.
+    return text.split(/\n{2,}/).map(block => {
+        const html = escapeHtml(block).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/`(.+?)`/g, '<code>$1</code>');
+        if (block.startsWith('## ')) return `<h3>${html.slice(3)}</h3>`;
+        if (block.startsWith('### ')) return `<h4>${html.slice(4)}</h4>`;
+        if (block.startsWith('- ')) return `<ul>${html.split('\n').map(l => `<li>${l.replace(/^- /, '')}</li>`).join('')}</ul>`;
+        return `<p>${html}</p>`;
+    }).join('');
+}
+
+async function showAgreement() {
+    const data = await (await authenticatedFetch('/api/agreement')).json();
+    document.getElementById('agreement-text').innerHTML = renderMarkdown(data.text);
+    document.getElementById('agreement-accept').dataset.version = data.version;
+    document.getElementById('agreement-modal').classList.remove('hidden');
+}
+
+async function acceptAgreement() {
+    const version = document.getElementById('agreement-accept').dataset.version;
+    const resp = await authenticatedFetch('/api/agreement', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version }),
+    });
+    if (!resp.ok) return showMessage('Could not record acceptance; reload the page', 'error');
+    document.getElementById('agreement-modal').classList.add('hidden');
+    if (await checkAuthStatus()) initializeApp();
+}
+
 async function handleLogout() {
     try {
-        await fetch('/api/auth/logout', { method: 'POST' });
+        await authenticatedFetch('/api/auth/logout', { method: 'POST' });
+        document.getElementById('agreement-modal').classList.add('hidden');
         currentUser = null;
         showAuthModal();
         updateUserDisplay();
@@ -121,7 +212,17 @@ function updateUserDisplay() {
 // Authenticated Fetch (handles 401s)
 // ============================================================================
 
+function csrfToken() {
+    const m = document.cookie.match(/(?:^|;\s*)e13_csrf=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+}
+
 async function authenticatedFetch(url, options = {}) {
+    // NFR-5: every mutating request echoes the CSRF cookie
+    const method = (options.method || 'GET').toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
+        options = { ...options, headers: { ...(options.headers || {}), 'X-CSRF-Token': csrfToken() } };
+    }
     const resp = await fetch(url, options);
     if (resp.status === 401) {
         currentUser = null;
@@ -308,10 +409,8 @@ async function loadAdmin() {
                 <td>${b.relabel_of ? `${escapeHtml(b.relabel_of)} (after ${b.relabel_after_days}d)` : '–'}</td>
                 <td>${escapeHtml(b.tier_ceiling)}</td></tr>`).join('')
             || '<tr><td colspan="7">No batches yet: python -m e13_labeler import FILE --batch NAME</td></tr>';
-        document.querySelector('#labelers-table tbody').innerHTML = labelers.labelers.map(l => `
-            <tr><td>${escapeHtml(l.pseudonym)}</td><td>${escapeHtml(l.login_name || '')}</td>
-                <td>${escapeHtml(l.kind)}</td><td>${escapeHtml(l.role)}</td><td>${escapeHtml(l.clearance)}</td>
-                <td>${escapeHtml(l.status)}</td><td>${escapeHtml(l.last_seen || '')}</td></tr>`).join('');
+        document.querySelector('#labelers-table tbody').innerHTML = labelers.labelers
+            .filter(l => l.kind === 'human').map(labelerRow).join('');
         document.querySelector('#flags-table tbody').innerHTML = flags.flags.map(f => `
             <tr><td>${escapeHtml(f.item_id)}</td><td>${escapeHtml(f.kind)}</td><td>${escapeHtml(f.note || '')}</td>
                 <td>${escapeHtml(f.pseudonym)}</td><td>${escapeHtml(f.created_at)}</td></tr>`).join('')
@@ -321,12 +420,68 @@ async function loadAdmin() {
     }
 }
 
+// Labeler management (FR-52)
+function labelerRow(l) {
+    const manageable = l.role !== 'owner' && l.id !== currentUser.id &&
+        (currentUser.role === 'owner' || l.role === 'labeler');
+    const actions = !manageable ? '' : [
+        l.status === 'active' || l.status === 'onboarding' ? ['pause', 'Pause'] : null,
+        l.status === 'paused' ? ['resume', 'Resume'] : null,
+        l.status !== 'revoked' ? ['reset', 'Reset link'] : null,
+        l.status !== 'revoked' && currentUser.role === 'owner'
+            ? ['clearance', l.clearance === 'public' ? 'Make internal' : 'Make public'] : null,
+        l.status !== 'revoked' ? ['revoke', 'Revoke'] : null,
+    ].filter(Boolean).map(([a, label]) =>
+        `<button class="btn btn-small" onclick="labelerAction('${l.pseudonym}', '${a}', '${l.clearance}')">${label}</button>`).join(' ');
+    const gold = l.gold_rolling == null ? '–' : `${fmt(l.gold_rolling)}${l.gold_below_threshold ? ' <span class="tag cand">LOW</span>' : ''}`;
+    const status = l.status + (l.pause_reason ? ` (${l.pause_reason})` : '');
+    return `<tr><td>${escapeHtml(l.pseudonym)}</td><td>${escapeHtml(l.login_name || '')}</td>
+        <td>${escapeHtml(l.role)}</td><td>${escapeHtml(l.clearance)}</td><td>${escapeHtml(status)}</td>
+        <td>${l.n_labelled ?? '–'} (${l.n_today ?? 0})</td>
+        <td>${l.median_active_ms == null ? '–' : (l.median_active_ms / 1000).toFixed(1) + ' s'}</td>
+        <td>${gold}</td><td>${escapeHtml(l.last_seen || '')}</td><td>${actions}</td></tr>`;
+}
+
+async function labelerAction(pseudonym, action, clearance) {
+    if (action === 'revoke' && !confirm(`Revoke ${pseudonym}? This ends their sessions and can't be undone.`)) return;
+    let url = `/api/admin/labelers/${pseudonym}/${action}`;
+    let body = {};
+    if (action === 'clearance') body = { clearance: clearance === 'public' ? 'internal' : 'public' };
+    if (action === 'resume' && currentUser.role === 'owner') {
+        body = { skip_quiz: confirm('Activate without a passed quiz? (Cancel: back to onboarding unless they passed one)') };
+    }
+    const resp = await authenticatedFetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) return showMessage(typeof data.detail === 'string' ? data.detail : 'Failed', 'error');
+    if (action === 'reset') {
+        document.getElementById('invite-result').textContent =
+            `Reset link for ${pseudonym} (shown once, expires ${data.expires_at}): ${location.origin}${data.path}`;
+    }
+    loadAdmin();
+}
+
+async function createInvite() {
+    const resp = await authenticatedFetch('/api/admin/invites', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: document.getElementById('invite-role').value,
+                               clearance: document.getElementById('invite-clearance').value }),
+    });
+    const data = await resp.json();
+    document.getElementById('invite-result').textContent = resp.ok
+        ? `Invite (${data.role}, ${data.clearance}; shown once, expires ${data.expires_at}): ${location.origin}${data.path}`
+        : `Invite failed: ${data.detail}`;
+}
+
 // ============================================================================
 // Startup
 // ============================================================================
 
 function initializeApp() {
     updateAdminTabVisibility();
+    if (currentUser.needs_agreement) return showAgreement();
+    if (typeof showOnboarding === 'function' && showOnboarding()) return;
     loadNextItem();
 }
 

@@ -26,7 +26,44 @@
                     <button type="submit" class="btn btn-primary">Log in</button>
                 </div>
             </form>
+            <form id="register-form" class="hidden" onsubmit="handleRegister(event)">
+                <p class="instructions">You were invited. Choose a login name and a password (10+ characters).</p>
+                <div class="form-group">
+                    <label for="register-name">Login name</label>
+                    <input type="text" id="register-name" required minlength="3" maxlength="64" autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="register-password">Password</label>
+                    <input type="password" id="register-password" required minlength="10" autocomplete="new-password">
+                </div>
+                <div id="register-error" class="form-error hidden"></div>
+                <div class="modal-actions">
+                    <button type="submit" class="btn btn-primary">Create account</button>
+                </div>
+            </form>
+            <form id="reset-form" class="hidden" onsubmit="handleReset(event)">
+                <p class="instructions">Set a new password (10+ characters).</p>
+                <div class="form-group">
+                    <label for="reset-password">New password</label>
+                    <input type="password" id="reset-password" required minlength="10" autocomplete="new-password">
+                </div>
+                <div id="reset-error" class="form-error hidden"></div>
+                <div class="modal-actions">
+                    <button type="submit" class="btn btn-primary">Set password</button>
+                </div>
+            </form>
             <div class="anonymous-note">Accounts are created by invitation. Ask the project owner for one.</div>
+        </div>
+    </div>
+
+    <!-- Contributor agreement (FR-60) -->
+    <div id="agreement-modal" class="modal-overlay hidden">
+        <div class="modal modal-wide modal-tall">
+            <div id="agreement-text" class="help-content markdown"></div>
+            <div class="modal-actions">
+                <button class="btn" onclick="handleLogout()">Log out</button>
+                <button class="btn btn-primary" id="agreement-accept" onclick="acceptAgreement()">I accept</button>
+            </div>
         </div>
     </div>
 
@@ -138,9 +175,18 @@
                 <div id="export-result" class="question-type" style="margin-top: 8px;"></div>
             </div>
             <div class="card">
-                <h3>Labelers</h3>
+                <div class="labels-header">
+                    <h3>Labelers</h3>
+                    <span>
+                        <select id="invite-role" aria-label="Invite role"><option>labeler</option><option>admin</option></select>
+                        <select id="invite-clearance" aria-label="Invite clearance"><option>public</option><option>internal</option></select>
+                        <button class="btn btn-primary btn-small" onclick="createInvite()">Invite</button>
+                    </span>
+                </div>
+                <div id="invite-result" class="question-type"></div>
                 <table class="admin-table" id="labelers-table">
-                    <thead><tr><th>Pseudonym</th><th>Login</th><th>Kind</th><th>Role</th><th>Clearance</th><th>Status</th><th>Last seen</th></tr></thead>
+                    <thead><tr><th>Pseudonym</th><th>Login</th><th>Role</th><th>Clearance</th><th>Status</th>
+                        <th>Done (today)</th><th>Median active</th><th>Gold (rolling)</th><th>Last seen</th><th></th></tr></thead>
                     <tbody></tbody>
                 </table>
             </div>

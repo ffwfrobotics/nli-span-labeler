@@ -28,7 +28,10 @@ async function loadNextItem() {
     }
     if (resp.status === 404 || resp.status === 403) {
         const detail = (await resp.json()).detail;
-        showEmpty(resp.status === 404 ? 'No items to label right now. Check back when a batch is open.' : detail);
+        if (detail && detail.agreement) return showAgreement();
+        if (detail && detail.quiz && typeof showOnboarding === 'function') return showOnboarding(detail);
+        showEmpty(resp.status === 404 ? 'No items to label right now. Check back when a batch is open.'
+            : (typeof detail === 'string' ? detail : detail.message));
         return;
     }
     if (resp.status === 409) {

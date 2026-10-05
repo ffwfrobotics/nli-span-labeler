@@ -107,7 +107,16 @@ def labeler_dict(row: sqlite3.Row) -> dict:
         "role": row["role"],
         "clearance": row["clearance"],
         "status": row["status"],
+        "pause_reason": row["pause_reason"],
+        "agreement_version": row["agreement_version"],
     }
+
+
+def needs_agreement(labeler: dict) -> bool:
+    """FR-60: everyone but the owner accepts the current contributor agreement first."""
+    from . import contributor
+
+    return labeler["role"] != "owner" and labeler.get("agreement_version") != contributor.VERSION
 
 
 # ============================================================================
@@ -149,6 +158,38 @@ def delete_session(token: str):
 def revoke_sessions(conn: sqlite3.Connection, labeler_id: int):
     """End every session of a labeler immediately (FR-52)."""
     conn.execute("DELETE FROM sessions WHERE labeler_id = ?", (labeler_id,))
+
+
+# ============================================================================
+# CSRF (NFR-5)
+# ============================================================================
+
+CSRF_COOKIE = "e13_csrf"
+CSRF_HEADER = "X-CSRF-Token"
+# SINGLE_USER mode has no session to derive a token from; a per-process secret
+# stands in (restarting the server just means reloading the page).
+_SINGLE_USER_CSRF = secrets.token_urlsafe(32)
+
+
+def csrf_token(session_token: Optional[str]) -> Optional[str]:
+    """
+    The token mutating requests must echo in X-CSRF-Token. Derived from the
+    session token, so it can't be planted from a sibling site (cookie tossing)
+    and needs no storage. JS reads it from the e13_csrf cookie, which a
+    cross-site page can't.
+    """
+    if config.single_user():
+        return _SINGLE_USER_CSRF
+    if not session_token:
+        return None
+    return hashlib.sha256(f"csrf\0{session_token}".encode()).hexdigest()
+
+
+def csrf_ok(request: Request) -> bool:
+    expected = csrf_token(request.cookies.get(config.SESSION_COOKIE))
+    if expected is None:
+        return True  # no ambient authority to abuse; the endpoint itself answers 401
+    return secrets.compare_digest(request.headers.get(CSRF_HEADER, ""), expected)
 
 
 # ============================================================================
@@ -205,14 +246,22 @@ def require_role(*roles: str):
     return checker
 
 
-async def require_active(labeler: dict = Depends(get_current_labeler)) -> dict:
+async def require_agreement(labeler: dict = Depends(get_current_labeler)) -> dict:
+    """FR-60: nothing beyond reading your own status before the contributor agreement is accepted."""
+    if needs_agreement(labeler):
+        raise HTTPException(403, {"agreement": True, "message": "Accept the contributor agreement first"})
+    return labeler
+
+
+async def require_active(labeler: dict = Depends(require_agreement)) -> dict:
     """
     Labelling, skipping, flagging and lock extension need an active account.
     Paused, invited, onboarding (quiz not passed, FR-26) and revoked accounts can
     still log in and read their own status, but not label.
     """
     if labeler["status"] != "active":
-        raise HTTPException(403, f"Account is {labeler['status']}")
+        raise HTTPException(403, {"status": labeler["status"], "pause_reason": labeler.get("pause_reason"),
+                                  "message": f"Account is {labeler['status']}"})
     return labeler
 
 

@@ -309,7 +309,85 @@ ALTER TABLE annotations ADD COLUMN asof TEXT;
 ALTER TABLE locks ADD COLUMN asof TEXT;
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6]
+# v7: M2, multi-labeler.
+# - invites double as password-reset links (FR-51, FR-52);
+# - pause reasons, contributor agreement (FR-30, FR-60), guideline views (FR-26);
+# - quiz answers one row each, retraining quizzes (FR-27, FR-30);
+# - hidden gold probes are marked on the lock that serves them (FR-28);
+# - flags can be resolved (FR-44);
+# - adjudications are versioned, never overwritten (FR-43, NFR-6). The v1 table
+#   was never written to, so it is rebuilt;
+# - no hard deletes of labels, gold, items, labelers or the audit log (NFR-6),
+#   enforced by triggers. Sessions, locks and invites may still be deleted.
+NO_DELETE_TABLES = ("items", "labelers", "annotations", "spans", "gold", "adjudications", "flags",
+                    "quiz_attempts", "quiz_answers", "guideline_views", "import_runs", "audit_log")
+
+SCHEMA_V7 = """
+ALTER TABLE invites ADD COLUMN purpose TEXT NOT NULL DEFAULT 'invite' CHECK (purpose IN ('invite', 'reset'));
+ALTER TABLE invites ADD COLUMN labeler_id INTEGER REFERENCES labelers(id);
+ALTER TABLE invites ADD COLUMN created_at TEXT;
+ALTER TABLE invites ADD COLUMN used_at TEXT;
+
+ALTER TABLE labelers ADD COLUMN pause_reason TEXT;
+ALTER TABLE labelers ADD COLUMN agreement_version TEXT;
+ALTER TABLE labelers ADD COLUMN agreement_at TEXT;
+
+CREATE TABLE guideline_views (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    labeler_id INTEGER NOT NULL REFERENCES labelers(id),
+    version TEXT NOT NULL,
+    viewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_guideline_views_labeler ON guideline_views(labeler_id);
+
+ALTER TABLE quiz_attempts ADD COLUMN kind TEXT NOT NULL DEFAULT 'onboarding'
+    CHECK (kind IN ('onboarding', 'retraining'));
+ALTER TABLE quiz_attempts ADD COLUMN finished_at TEXT;
+CREATE TABLE quiz_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id INTEGER NOT NULL REFERENCES quiz_attempts(id),
+    item_id TEXT NOT NULL REFERENCES items(item_id),
+    position INTEGER NOT NULL,
+    answer_json TEXT,
+    score REAL,
+    answered_at TEXT,
+    UNIQUE (attempt_id, item_id)
+);
+
+ALTER TABLE locks ADD COLUMN gold_probe INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE flags ADD COLUMN resolved_by INTEGER REFERENCES labelers(id);
+ALTER TABLE flags ADD COLUMN resolved_at TEXT;
+ALTER TABLE flags ADD COLUMN resolution TEXT;
+
+CREATE TABLE adjudications_v7 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL REFERENCES items(item_id),
+    batch_id INTEGER REFERENCES batches(id),
+    version INTEGER NOT NULL DEFAULT 1,
+    answerable INTEGER NOT NULL DEFAULT 0,
+    reasons_json TEXT NOT NULL,
+    spans_json TEXT NOT NULL DEFAULT '[]',
+    note TEXT,
+    adjudicator_id INTEGER REFERENCES labelers(id),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (item_id, batch_id, version)
+);
+INSERT INTO adjudications_v7 (item_id, batch_id, reasons_json, spans_json, adjudicator_id, created_at)
+    SELECT item_id, batch_id, reasons_json, spans_json, adjudicator_id, created_at FROM adjudications;
+DROP TABLE adjudications;
+ALTER TABLE adjudications_v7 RENAME TO adjudications;
+CREATE INDEX idx_adjudications_item ON adjudications(item_id);
+""" + "".join(
+    f"CREATE TRIGGER no_delete_{t} BEFORE DELETE ON {t} BEGIN "
+    f"SELECT RAISE(ABORT, 'no hard deletes (NFR-6): retire, revoke or version instead'); END;\n"
+    for t in NO_DELETE_TABLES
+) + """
+CREATE TRIGGER no_update_audit_log BEFORE UPDATE ON audit_log BEGIN
+    SELECT RAISE(ABORT, 'the audit log is append-only'); END;
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7]
 
 
 def connect() -> sqlite3.Connection:
