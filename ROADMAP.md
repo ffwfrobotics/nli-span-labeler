@@ -23,17 +23,18 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 ## M1: MVP, owner only
 
 ### Import (§4.1)
-- [ ] **FR-1** Import E09 pool JSONL. *Blocked on fixtures (`feature/e13-test-fixtures`).*
-- [ ] **FR-2** One item per (row, qid); `item_id = "<row id>#<qid>"`.
+- [~] **FR-1** Import E09 pool JSONL (`importer.py`). Tested on synthetic rows; still needed: the "first 100 real pool rows, 0 rejected" test on `feature/e13-test-fixtures`.
+- [x] **FR-2** One item per (row, qid); `item_id = "<row id>#<qid>"`. Row ids containing `#` are rejected.
 - [ ] **FR-3** Render `choice` / `score` / `noul` questions; fall back to the qid when `instructions` is missing; pretty-print JSON values.
-- [ ] **FR-4** Detect the state format (`json` when the state is, or parses to, an object or array); `state_format` overrides.
-- [ ] **FR-5** Store the state byte-exact, plus `state_sha256`; check the round trip.
-- [~] **FR-6** Tier resolution. `tiers.source_tier` and `max_tier` exist; the importer must apply them.
-- [ ] **FR-7** Optional `e13.*` fields, stored and never sent to labelers.
-- [ ] **FR-10** Idempotent import (same hash = no-op, different hash = reject unless `--replace`); write `import_runs`.
-- [ ] **FR-11** `python -m e13_labeler import FILE --batch NAME` (the admin upload page is M2).
-- [~] **FR-55** Refuse eval-only sources. The seed list (`llm_aggrefact`, `halubench`) is in `tiers.py`; the importer must enforce it and the list must be configurable. Note: neither source is in `source_permissions.json` **[eval #8]**.
-- [~] **FR-56** Max-tier rule. `tiers.max_tier` exists; still needed: tiers may only be lowered with a logged owner flag.
+- [x] **FR-4** Detect the state format (`json` when the state is, or parses to, an object or array); `state_format` overrides.
+- [~] **FR-5** Store the state byte-exact, plus `state_sha256`. Still needed: the export → re-import round-trip test (comes with FR-45). A state given as an object is serialised once and that string is stored.
+- [x] **FR-6** Tier resolution: explicit field, then source class; unverified/unknown → restricted; Jev raises.
+- [~] **FR-7** Optional `e13.*` fields, stored per item (`candidate_for` split by qid). Still needed: the "never sent to labelers" test (with FR-12).
+- [x] **FR-8** `model_answers` stored per item, hidden; a Jev teacher raises the tier (showing answers is FR-34).
+- [x] **FR-10** Idempotent import (same hash = no-op, different hash = reject unless `--replace`); `import_runs` and the audit log are written.
+- [~] **FR-11** `python -m e13_labeler import FILE --batch NAME` is done. Still needed: the admin upload page (M2).
+- [x] **FR-55** Refuse eval-only sources: the seed list plus `E13_EVAL_ONLY_SOURCES`. Neither seed source is in `source_permissions.json` **[eval #8]**. The source keys must be checked against the real pool data.
+- [x] **FR-56** Max-tier rule. A replacement that lowers a tier needs `--allow-lower-tier`, which is audit-logged.
 
 ### Labelling (§4.2, §6.1, §6.2)
 - [ ] **FR-12** Blind `GET /api/next` payload (§5.3): no `gold`, `source`, `e13`, `model_answers` or `is_gold_probe`, and no gold-based filters **[eval #1]**.
@@ -122,7 +123,7 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 ## Cross-cutting
 
 - [x] **NFR-3** No CDN or build step. Tested.
-- [~] **NFR-8** Tests run offline **[eval #6]**. Still needed: tests for every MUST FR, a blindness test, a tier fuzz test, the assignment property test and the α reference test.
+- [~] **NFR-8** Tests run offline **[eval #6]**. Still needed: tests for every MUST FR, a blindness test, a tier fuzz test and the assignment property test. The α reference test is done.
 - [x] **NFR-4** Pseudonyms (`L01`, …); contact details only in the owner-only `identity` table.
 - [ ] **NFR-1** `next`/submit p95 < 200 ms with 50k items and 10 labelers. Avoid the old `ORDER BY RANDOM()` full scans.
 - [ ] **NFR-2** Answerable item in one keystroke plus Enter; median ≤ 20 s (measure in the pilot).
@@ -136,3 +137,4 @@ Each FR's acceptance test is defined in the requirements doc. A task is done whe
 - [ ] Q7: the reference time for `stale_state`. It decides whether `e13.asof` is shown to labelers.
 - [ ] Q2: the keep rule; Q8: `false_premise` scope; Q9: the boundary order for ambiguous/underspecified/subjective; Q10: overlap of 2 or 3.
 - [ ] Import sample: `feature/e13-test-fixtures`.
+- [ ] Which teachers count as Jev (FR-8)? Currently `jev*` plus `E13_JEV_TEACHERS`. A Jev answer to any question raises **every** item of that row, since the output came from the shared state. Confirm that this conservative reading is wanted.

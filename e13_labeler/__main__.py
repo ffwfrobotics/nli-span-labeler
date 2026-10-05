@@ -3,6 +3,7 @@ Command-line entry point.
 
     python -m e13_labeler init-db
     python -m e13_labeler create-owner [--login NAME]
+    python -m e13_labeler import FILE [--batch NAME] [--replace] [--allow-lower-tier]
     python -m e13_labeler serve [--host 127.0.0.1] [--port 8000] [--reload]
 """
 
@@ -50,6 +51,23 @@ def cmd_create_owner(args) -> int:
     return 0
 
 
+def cmd_import(args) -> int:
+    """FR-11: import pool JSONL (requirements §5.2)."""
+    import json
+
+    from .importer import import_file
+
+    init_db()
+    with get_db() as conn:
+        report = import_file(conn, args.file, batch=args.batch, replace=args.replace,
+                             allow_lower_tier=args.allow_lower_tier)
+    for lineno, message in report.errors:
+        print(f"{args.file}:{lineno}: rejected: {message}", file=sys.stderr)
+    summary = {k: v for k, v in report.as_dict().items() if k != "errors"}
+    print(json.dumps(summary))
+    return 1 if report.n_rejected else 0
+
+
 def cmd_serve(args) -> int:
     import uvicorn
 
@@ -72,6 +90,14 @@ def main(argv=None) -> int:
     p.add_argument("--login")
     p.add_argument("--password-stdin", action="store_true", help="read the password from stdin")
     p.set_defaults(func=cmd_create_owner)
+
+    p = sub.add_parser("import", help="import pool JSONL rows as items")
+    p.add_argument("file")
+    p.add_argument("--batch", help="add the imported items to this batch (created as a draft if new)")
+    p.add_argument("--replace", action="store_true", help="overwrite items whose state changed")
+    p.add_argument("--allow-lower-tier", action="store_true",
+                   help="owner only: let a replacement lower an item's permissions tier (logged)")
+    p.set_defaults(func=cmd_import)
 
     p = sub.add_parser("serve", help="run the web app")
     p.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
